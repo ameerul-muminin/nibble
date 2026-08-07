@@ -4,6 +4,17 @@
 *.pem
 *.key
 
+# The database is a file on your machine. It is yours, not the repo's.
+# Delete it any time you want to start over with an empty app.
+*.db
+*.db-journal
+
+# The embedding model downloads itself here the first time you run it (~130 MB)
+.fastembed_cache/
+
+# Uploaded notes
+uploads/
+
 # Python
 __pycache__/
 *.py[cod]
@@ -17,11 +28,6 @@ venv/
 node_modules/
 dist/
 .vite/
-*.tsbuildinfo
-
-# Uploads & data
-backend/uploads/
-postgres-data/
 
 # Editors / OS
 .vscode/

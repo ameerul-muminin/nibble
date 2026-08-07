@@ -1,11 +1,15 @@
-type Props = {
-  size?: number
-  /** thinking = gentle bob while waiting for an answer */
-  mood?: 'idle' | 'thinking'
-}
-
-/** Nibble. Inline SVG so it can react to state without loading a second file. */
-export function Mascot({ size = 96, mood = 'idle' }: Props) {
+/**
+ * Nibble the cat, drawn directly in code as an SVG.
+ *
+ * Drawing it here rather than loading an image file means it can react to what
+ * the app is doing — see the `mood` prop, which makes Nibble bob gently while
+ * we wait for something.
+ *
+ * Props:
+ *   size  — how big, in pixels (default 96)
+ *   mood  — 'idle' or 'thinking'
+ */
+export function Mascot({ size = 96, mood = 'idle' }) {
   return (
     <svg
       viewBox="0 0 220 220"
