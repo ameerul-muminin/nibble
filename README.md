@@ -5,106 +5,97 @@
 Bite-sized answers from your own notes. Upload a chapter, ask a question, get an
 answer that comes from *your* material — with the page it came from.
 
-- **Frontend:** React + TypeScript (Vite)
+- **Frontend:** React (plain JavaScript, built with Vite)
 - **Backend:** FastAPI (Python)
-- **Database:** Postgres + pgvector (one database for everything, including embeddings)
-- **AI:** a hosted LLM API — we do not train models
+- **Database:** SQLite — one file, nothing to install
+- **Embeddings:** `bge-small-en-v1.5`, running locally on your own laptop
+- **Answers:** open-source Llama models via [Groq](https://console.groq.com), free
 
-New to the project? Read [`docs/how-it-works.md`](docs/how-it-works.md) first. It explains
-the whole system in plain English, no prior AI knowledge needed.
+Everything here is free. There is no paid API and no credit card anywhere in
+this project.
+
+> **New to the project? Start with [`docs/first-week.md`](docs/first-week.md).**
+> It assumes you have never used a terminal, and it is the fastest way to get
+> from nothing to a running app.
+>
+> Then read [`docs/how-it-works.md`](docs/how-it-works.md) to understand what
+> you just ran.
 
 ---
 
 ## Get it running
 
-You need [Docker Desktop](https://www.docker.com/products/docker-desktop/),
-[Python 3.12+](https://www.python.org/downloads/) and [Node 22+](https://nodejs.org/).
+You need [Python 3.12+](https://www.python.org/downloads/) and
+[Node 22+](https://nodejs.org/). That's all — no Docker, no database server.
 
-**1. Start the database** (one command, from the repo root):
-
-```bash
-docker compose up -d
-```
-
-**2. Start the backend:**
+**1. The backend** (first terminal):
 
 ```bash
 cd backend
 python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
+.venv\Scripts\activate        # Mac/Linux: source .venv/bin/activate
 pip install -e ".[dev]"
-cp .env.example .env             # then open .env and paste in your LLM key
+cp .env.example .env          # Windows: copy .env.example .env
 uvicorn app.main:app --reload
 ```
 
-Check it worked: open <http://localhost:8000/health> — you should see `{"status":"ok"}`.
-Interactive API docs are at <http://localhost:8000/docs>, generated automatically.
+Check it worked: <http://localhost:8000/health> shows `{"status":"ok"}`.
 
-**3. Start the frontend** (new terminal):
+**2. The frontend** (second terminal, leave the first running):
 
 ```bash
 cd frontend
 npm install
-cp .env.example .env
 npm run dev
 ```
 
-Open <http://localhost:5173>.
-
-If any step took you more than 10 minutes, that is a bug in this README — tell the
-tech lead and we will fix it.
+Open <http://localhost:5173>. Nibble should say the backend is up.
 
 ---
 
-## Ground rules
+## How we're building it
 
-1. **Never commit `.env`.** It holds the API key. `.gitignore` already blocks it,
-   so do not force-add it.
-2. **The API key lives in `backend/.env` only.** Anything in `frontend/.env`
-   ships to the browser where anyone can read it.
-3. **Never push straight to `main`.** Branch, open a pull request, get one review.
-4. **CI must be green before merge.** If it is red, the code is not done.
+In **vertical slices**. Every slice is a working app you could demo, not a layer
+of a half-built one.
 
----
+| Slice | What it adds | State |
+|---|---|---|
+| 0 | The frontend and backend talk to each other | ✅ done |
+| 1 | Upload a PDF and list it | planned |
+| 2 | Cut documents into chunks | planned |
+| 3 | Search your notes — *no AI yet* | planned |
+| 4 | Nibble answers, with sources | planned |
+| 5 | Make it look like Nibble | planned |
+| 6 | Quiz mode | stretch |
 
-## Everyday commands
-
-| What you want | Command |
-|---|---|
-| Start the database | `docker compose up -d` |
-| Stop the database | `docker compose down` |
-| Wipe the database and start fresh | `docker compose down -v` |
-| Run backend tests | `cd backend && pytest` |
-| Fix backend formatting | `cd backend && ruff format . && ruff check --fix .` |
-| Check frontend types | `cd frontend && npx tsc --noEmit` |
+Slice 3 is the interesting one: semantic search working with no chatbot
+involved at all.
 
 ---
 
-## Where things live
+## Where things are
 
 ```
-backend/app/
-  api/routes/    HTTP endpoints — thin. They validate input and call a service.
-  services/      The actual work: chunking, embeddings, retrieval, LLM calls.
-  models/        Database tables.
-  schemas/       Request and response shapes. This is the API contract.
-  core/          Configuration.
-
-frontend/src/
-  components/    Reusable UI pieces (Button, Mascot, ChatBubble).
-  lib/api.ts     The only file that talks to the backend.
-  styles/        Design tokens. All colours and spacing come from here.
+backend/app/routes.py   every URL the frontend can call
+backend/app/config.py   every setting, in one place
+frontend/src/App.jsx    the page
+frontend/src/api.js     the only file that knows the backend's address
+docs/api.md             the contract between the two — read before building
 ```
-
-**Rule of thumb:** if a route handler is longer than about 30 lines, the logic
-belongs in a service.
 
 ## Docs
 
-| File | What it covers |
+| File | What it's for |
 |---|---|
-| [`docs/how-it-works.md`](docs/how-it-works.md) | How the whole thing works, explained from zero |
-| [`docs/api.md`](docs/api.md) | The contract between frontend and backend |
+| [`docs/first-week.md`](docs/first-week.md) | Setup, from zero. Start here. |
+| [`docs/how-it-works.md`](docs/how-it-works.md) | How the whole thing works, in plain English |
+| [`docs/api.md`](docs/api.md) | The frontend ↔ backend contract |
 | [`docs/team.md`](docs/team.md) | Who owns what, and how we use git |
-| [`docs/design.md`](docs/design.md) | Colours, type, components, mascot |
-| [`docs/adr/`](docs/adr/) | Why we made the big technical choices |
+| [`docs/design.md`](docs/design.md) | Colours, shapes, and Nibble's voice |
+| [`docs/adr/`](docs/adr/) | Why we chose what we chose |
+
+## Using AI on this project
+
+Allowed and expected. The one rule: **don't merge code you can't explain.** Every
+pull request asks you to describe your change in your own words, and the reviewer
+will ask you one question about it. That's the whole quality bar.

@@ -7,11 +7,17 @@ where merge conflicts and bad feelings come from.
 
 | Person | Owns | Never edits without asking |
 |---|---|---|
-| Backend dev | `backend/` | `frontend/` |
-| Frontend dev | `frontend/`, `assets/` | `backend/` |
-| Tech lead | `docs/`, `infra/`, `.github/`, reviews every PR | — |
+| Fahim (backend) | `backend/app/routes.py`, `backend/tests/` | `frontend/` |
+| Arman (frontend) | `frontend/src/`, `assets/` | `backend/` |
+| Alif (tech lead) | `backend/app/db.py`, `embeddings.py`, `llm.py`, `config.py`, `docs/`, `.github/`, reviews every PR | — |
 
-`docs/api.md` is shared ground. Changing it needs both devs to agree first.
+The split inside `backend/` is deliberate. Routes follow a repeating pattern, so
+each one is a little easier than the last — that's the learning path. The three
+engine modules have non-obvious failure modes (threading, model loading, network
+errors), so Alif absorbs those and nobody sits blocked on them.
+
+`docs/api.md` is the contract. **Alif writes the entry there before either side
+starts a slice**, so both can build at the same time without waiting.
 
 ## Git, the short version
 
@@ -48,26 +54,35 @@ mention `--force`. Nothing is ever lost until someone force-pushes.
 
 ## Build order
 
-Build a thin slice that works end to end before building anything wide. A demo
-where one thing works completely beats four half-finished features.
+We build in **vertical slices**. Every slice ends in something you could demo
+that day — never a half-finished layer. A demo where one thing works completely
+beats four things that half work.
 
-**Phase 1 — the skeleton (must work).**
-Upload a PDF → chunk → embed → store → ask a question → get a grounded answer
-with sources. Ugly UI is fine. This is the whole project; everything else is
-decoration.
+| Slice | What it adds |
+|---|---|
+| 0 | The two programs talk to each other ✅ |
+| 1 | Upload a PDF and list it |
+| 2 | Cut documents into chunks |
+| 3 | Search your notes — **no AI yet** |
+| 4 | Nibble answers, with sources |
+| 5 | Make it look like Nibble |
+| 6 | Quiz mode (stretch) |
 
-**Phase 2 — make it feel like Nibble.**
-Real design system, mascot in the loading and empty states, chat history that
-survives a refresh, summaries.
+Each slice is a GitHub milestone, and each task in it is an issue assigned to
+one person. Take the next issue in the current milestone; don't skip ahead.
 
-**Phase 3 — the fun features, in this order.**
-1. **Nibble's personality** — mostly prompt engineering, almost free.
-2. **Quiz battles + leaderboard** — plain frontend and backend logic, no AI
-   needed beyond generating questions from chunks you already have.
-3. **Knowledge map** — needs topic tagging on top of chunks. Genuinely hard.
-   Present it as a planned next step, not a promise.
+**Finish a slice before starting the next one.** The point of the ordering is
+that the demo is safe from the end of slice 4 — everything after that is polish
+we can drop if time runs out.
 
-**Do not start phase 2 until phase 1 works.**
+## Using AI
+
+Use it. It's a good teacher and nobody is pretending otherwise.
+
+The one rule: **don't merge code you can't explain.** Every pull request asks you
+to describe your change in your own words, and the reviewer asks one question
+about it. Can't answer it? That's not a telling-off — go back and read your own
+change until you can, and ask the AI to *explain* rather than to write more.
 
 ## Weekly rhythm
 

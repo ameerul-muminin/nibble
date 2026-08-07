@@ -1,37 +1,32 @@
-"""Nibble API — the entry point. Run with: uvicorn app.main:app --reload"""
+"""Nibble's backend — the starting point.
 
-from contextlib import asynccontextmanager
+Run it from the `backend` folder with:
+
+    uvicorn app.main:app --reload
+
+Then open http://localhost:8000/health in a browser. If you see
+{"status":"ok"}, it works.
+
+This file stays small on purpose. Its only jobs are: create the app, say who
+is allowed to call it, and plug in the routes. The actual URLs live in
+routes.py.
+"""
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import text
 
-from app.api.routes import chat, documents, health
-from app.core.config import get_settings
-from app.db.session import engine
-from app.models import Base
+from app import config
+from app.routes import router
 
+app = FastAPI(title="Nibble API", version="0.1.0")
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Good enough while the schema is changing daily. Swap to Alembic
-    # migrations before anyone relies on data surviving a change.
-    with engine.begin() as connection:
-        connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-    Base.metadata.create_all(bind=engine)
-    yield
-
-
-app = FastAPI(title="Nibble API", version="0.1.0", lifespan=lifespan)
-
+# Without this, the browser silently blocks the frontend from talking to us.
+# It is the single most common "why is nothing happening" bug in this project.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=get_settings().cors_origin_list,
-    allow_credentials=True,
+    allow_origins=config.CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-app.include_router(health.router)
-app.include_router(documents.router)
-app.include_router(chat.router)
+app.include_router(router)

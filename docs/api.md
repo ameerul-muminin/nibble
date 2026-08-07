@@ -1,42 +1,46 @@
 # API contract
 
-The agreement between frontend and backend. **Agree on changes here before
-writing code**, so both sides can work at the same time.
+The agreement between frontend and backend. **Alif writes the entry here before
+either side starts building a slice**, so Fahim and Arman can work at the same
+time without waiting for each other.
 
 Base URL in development: `http://localhost:8000`
 
-A live, clickable version is generated automatically at
-<http://localhost:8000/docs> whenever the backend is running.
+A live, clickable version appears at <http://localhost:8000/docs> whenever the
+backend is running. FastAPI generates it from the code, so it is never out of date.
 
 ---
 
-## `GET /health`
+## Slice 0 — built
 
-Is the server up and can it reach the database?
+### `GET /health`
+
+Is the backend awake? The frontend calls this on page load.
 
 ```json
 { "status": "ok" }
 ```
 
-## `GET /documents`
+---
 
-Every document belonging to the current user, newest first.
+## Slice 1 — planned
+
+### `GET /documents`
+
+Every uploaded document, newest first.
 
 ```json
 [
   {
-    "id": "9f1c...",
+    "id": 1,
     "filename": "biology-ch4.pdf",
-    "status": "ready",
     "page_count": 18,
-    "created_at": "2026-08-07T09:14:22Z"
+    "created_at": "2026-08-07T09:14:22"
   }
 ]
 ```
 
-`status` is one of `processing`, `ready`, `failed`.
-
-## `POST /documents`
+### `POST /documents`
 
 Upload a file. `multipart/form-data`, field name `file`.
 Accepts `.pdf`, `.txt`, `.md`. Maximum 20 MB.
@@ -45,37 +49,81 @@ Returns `201` with a single document object, shaped as above.
 
 Errors: `400` wrong file type · `413` too large.
 
-## `DELETE /documents/{id}`
+### `DELETE /documents/{id}`
 
 Deletes the document and all of its chunks. Returns `204` with no body.
 
-Errors: `404` not found, or it belongs to someone else.
+Errors: `404` not found.
 
-## `POST /chat/ask`
+---
 
-The main endpoint.
+## Slice 2 — planned
+
+### `GET /documents/{id}/chunks`
+
+The pieces a document was cut into. Mostly so we can *see* that chunking worked.
+
+```json
+[
+  { "id": 1, "page": 1, "content": "Osmosis is the net movement of water..." }
+]
+```
+
+---
+
+## Slice 3 — planned
+
+### `POST /search`
+
+Find the notes most relevant to some text. **No AI answer** — just the matching
+pieces and how well each one matched.
 
 Request:
 
 ```json
-{
-  "question": "explain osmosis simply",
-  "session_id": null
-}
+{ "query": "how does osmosis work" }
 ```
-
-Send `session_id: null` for a new conversation; reuse the id you get back to
-continue the same one.
 
 Response:
 
 ```json
 {
-  "session_id": "3ab8...",
+  "results": [
+    {
+      "document_id": 1,
+      "filename": "biology-ch4.pdf",
+      "page": 4,
+      "content": "Osmosis is the net movement of water...",
+      "score": 0.82
+    }
+  ]
+}
+```
+
+`score` runs from 0 to 1. Higher is a closer match.
+
+---
+
+## Slice 4 — planned
+
+### `POST /ask`
+
+The main endpoint. Searches, then asks the model to answer from what it found.
+
+Request:
+
+```json
+{ "question": "explain osmosis simply" }
+```
+
+Response:
+
+```json
+{
   "answer": "Water moves across a membrane toward the side with more solute (p. 4).",
   "sources": [
     {
-      "document_id": "9f1c...",
+      "document_id": 1,
       "filename": "biology-ch4.pdf",
       "page": 4,
       "excerpt": "Osmosis is the net movement of water..."
@@ -84,13 +132,15 @@ Response:
 }
 ```
 
-`sources` is empty when nothing relevant was found — the answer will say so
-rather than guess.
+`sources` is empty when nothing relevant was found — and the answer says so
+rather than guessing.
 
 ---
 
 ## Rules for changing this file
 
-1. Propose the change in the group chat before you build it.
-2. Update this file **and** `backend/app/schemas/dto.py` in the same pull request.
-3. Say clearly in the PR description what the other side needs to change.
+1. Alif writes the entry here **first**, before either side builds it.
+2. If you need to change a shape that already exists, say so in the group chat
+   before you write the code — someone else is building against it right now.
+3. Update this file in the **same pull request** as the code, and say in the PR
+   description what the other side needs to change.
