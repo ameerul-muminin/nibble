@@ -1,0 +1,49 @@
+/* Nibble design tokens.
+   Every colour, radius and shadow in the app comes from this file.
+   If you find yourself typing a raw hex code in a component, stop and add a
+   token here instead — that is how the app stays visually consistent. */
+
+:root {
+  /* Brand — lifted from the pitch deck */
+  --ink: #0a0a0a;
+  --lime: #d8f84b;
+  --lime-deep: #b4d62c;
+  --indigo: #4d4df5;
+  --indigo-deep: #3a3ac4;
+  --mint: #4fde82;
+  --coral: #f26b3d;
+
+  /* Surfaces */
+  --paper: #ffffff;
+  --cream: #fdf6e3;
+  --haze: #eaf4d5;
+  --page: #fbfbf7;
+
+  /* Text */
+  --text: #0a0a0a;
+  --text-muted: #5c5c50;
+  --text-faint: #9a9a9a;
+
+  /* Shape — chunky and friendly, never sharp */
+  --radius-sm: 10px;
+  --radius: 16px;
+  --radius-lg: 24px;
+  --radius-pill: 999px;
+  --border: 3px solid var(--ink);
+
+  /* The signature: a solid bottom edge instead of a blurry shadow.
+     Pressing a control moves it down onto its own shadow. */
+  --lift: 0 4px 0 var(--ink);
+  --lift-lg: 0 6px 0 var(--ink);
+
+  /* Type */
+  --font-display: 'Fredoka', system-ui, sans-serif;
+  --font-body: 'Nunito', system-ui, sans-serif;
+
+  /* Spacing */
+  --gap-xs: 6px;
+  --gap-sm: 10px;
+  --gap: 16px;
+  --gap-lg: 24px;
+  --gap-xl: 40px;
+}
