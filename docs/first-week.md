@@ -113,6 +113,23 @@ cd frontend
 npm install
 ```
 
+Then make your settings file, the same way you did for the backend:
+
+```bash
+# Windows
+copy .env.example .env.local
+
+# Mac / Linux
+cp .env.example .env.local
+```
+
+This one you **cannot** leave empty. Open `.env.local` and paste the Clerk
+publishable key next to `VITE_CLERK_PUBLISHABLE_KEY=`. Ask Alif for it.
+
+Without that key the page does not draw at all — you get a Clerk error instead
+of Nibble, because the sign-in wrapper refuses to start without it. If that is
+what you are looking at, this is why.
+
 **Check.** A `node_modules` folder appears. Never open it. Never commit it.
 
 ---
