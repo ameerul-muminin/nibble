@@ -4,6 +4,9 @@
 *.pem
 *.key
 
+# Tech lead's private notes. Not for the repo — it discusses the team by name.
+HANDOFF.md
+
 # The database is a file on your machine. It is yours, not the repo's.
 # Delete it any time you want to start over with an empty app.
 *.db

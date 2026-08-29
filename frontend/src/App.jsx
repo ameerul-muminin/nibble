@@ -10,6 +10,7 @@
  */
 
 import { useEffect, useState } from 'react'
+import { Show, SignInButton, SignUpButton, UserButton } from '@clerk/react'
 import { getHealth } from './api'
 import { Mascot } from './components/Mascot'
 import './styles/global.css'
@@ -50,6 +51,21 @@ export default function App() {
           <p style={{ margin: 0, color: 'var(--text-muted)' }}>
             Bite-sized answers from your own notes
           </p>
+        </div>
+
+        {/*
+          Show picks one branch based on whether somebody is signed in. Clerk
+          knows the answer because ClerkProvider wraps the whole app in main.jsx.
+          marginLeft: 'auto' pushes this cluster to the right-hand end of the row.
+        */}
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 'var(--gap-sm)' }}>
+          <Show when="signed-out">
+            <SignInButton mode="modal" />
+            <SignUpButton mode="modal" />
+          </Show>
+          <Show when="signed-in">
+            <UserButton />
+          </Show>
         </div>
       </header>
 
