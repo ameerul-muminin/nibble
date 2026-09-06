@@ -81,3 +81,15 @@ export function uploadDocument(file) {
 export function deleteDocument(id) {
   return request(`/documents/${id}`, { method: 'DELETE' })
 }
+
+/**
+ * Slice 2: the pieces one document was cut into, in reading order.
+ *
+ * Returns an array of { id, page, content }. An empty array is a real answer —
+ * the document exists and has no pieces, which is the state everything uploaded
+ * before slice 2 is in. A document id that does not exist is a 404, and
+ * `request` turns that into a thrown Error with the backend's own sentence.
+ */
+export function getChunks(id) {
+  return request(`/documents/${id}/chunks`)
+}

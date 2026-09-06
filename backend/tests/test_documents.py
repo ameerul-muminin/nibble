@@ -416,3 +416,125 @@ def test_two_concurrent_deletes_give_one_204_and_one_404(client):
 
     assert codes == [204, 404]
     assert client.get("/documents").json() == []
+
+
+# ---------------------------------------------------------------------------
+# Slice 2 — chunks stored on upload, and GET /documents/{id}/chunks
+# ---------------------------------------------------------------------------
+
+
+def test_upload_stores_chunks(client):
+    """The point of slice 2: the text is no longer thrown away.
+
+    Before this, an upload stored a filename, a page count and a date, and not
+    one searchable word.
+    """
+    text = b"Osmosis is the net movement of water across a semipermeable membrane. " * 30
+    created = client.post("/documents", files={"file": ("bio.txt", text, "text/plain")}).json()
+
+    chunks = client.get(f"/documents/{created['id']}/chunks").json()
+
+    assert len(chunks) > 1
+    assert all(set(c) == {"id", "page", "content"} for c in chunks)
+    assert all(c["page"] == 1 for c in chunks)
+
+
+def test_chunks_come_back_in_reading_order(client):
+    pdf = _make_text_pdf(["Page one. " * 40, "Page two. " * 40, "Page three. " * 40])
+    created = client.post(
+        "/documents", files={"file": ("notes.pdf", pdf, "application/pdf")}
+    ).json()
+
+    chunks = client.get(f"/documents/{created['id']}/chunks").json()
+
+    pages = [c["page"] for c in chunks]
+    assert pages == sorted(pages)
+    assert set(pages) == {1, 2, 3}
+
+
+def test_chunk_page_numbers_match_the_real_pdf(client):
+    """A page number that is wrong is worse than none — slice 4 shows it to a student."""
+    pdf = _make_text_pdf(["alpha " * 40, "bravo " * 40])
+    created = client.post(
+        "/documents", files={"file": ("notes.pdf", pdf, "application/pdf")}
+    ).json()
+
+    chunks = client.get(f"/documents/{created['id']}/chunks").json()
+
+    for chunk in chunks:
+        expected = "alpha" if chunk["page"] == 1 else "bravo"
+        assert expected in chunk["content"]
+
+
+def test_consecutive_chunks_overlap_through_the_route(client):
+    text = ("".join(f"{n:04d} " for n in range(600))).encode()
+    created = client.post("/documents", files={"file": ("nums.txt", text, "text/plain")}).json()
+
+    chunks = client.get(f"/documents/{created['id']}/chunks").json()
+
+    assert len(chunks) > 1
+    assert chunks[1]["content"][:50] in chunks[0]["content"]
+
+
+def test_chunks_for_a_missing_document_is_404(client):
+    response = client.get("/documents/999/chunks")
+
+    assert response.status_code == 404
+    assert "isn't here" in response.json()["detail"]
+
+
+def test_chunks_for_a_document_with_none_is_an_empty_list_not_404(client):
+    """The two cases a single SELECT could not tell apart.
+
+    A document uploaded before slice 2 exists and has no pieces, and that is a
+    real answer — not the same as an id that was never there.
+    """
+    created = client.post(
+        "/documents", files={"file": ("notes.txt", b"a" * 200, "text/plain")}
+    ).json()
+
+    from app.db import get_db
+
+    db = get_db()
+    db.execute("DELETE FROM chunks WHERE document_id = ?", (created["id"],))
+    db.commit()
+    db.close()
+
+    response = client.get(f"/documents/{created['id']}/chunks")
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_chunks_with_a_non_numeric_id_is_rejected(client):
+    assert client.get("/documents/abc/chunks").status_code == 422
+
+
+def test_deleting_a_document_takes_its_chunks_with_it(client):
+    """Cascade, seen from the endpoint rather than from the table."""
+    text = b"Osmosis is the net movement of water across a membrane. " * 30
+    created = client.post("/documents", files={"file": ("bio.txt", text, "text/plain")}).json()
+
+    assert client.get(f"/documents/{created['id']}/chunks").json() != []
+
+    client.delete(f"/documents/{created['id']}")
+
+    assert client.get(f"/documents/{created['id']}/chunks").status_code == 404
+
+
+def test_a_document_with_no_chunks_is_never_stored(client, monkeypatch):
+    """The upload refuses rather than storing something unsearchable.
+
+    Chunking is stubbed to produce nothing, because with the real settings every
+    page that has text produces at least one piece — so this guards the route's
+    promise directly rather than through chunking's internals. If a future change
+    to chunk_pages ever starts returning nothing, this fails instead of quietly
+    filling the list with notes that match no search.
+    """
+    monkeypatch.setattr("app.routes.chunk_pages", lambda pages: [])
+
+    response = client.post("/documents", files={"file": ("notes.txt", b"a" * 200, "text/plain")})
+
+    assert response.status_code == 400
+    assert "too little writing" in response.json()["detail"]
+    assert client.get("/documents").json() == []
