@@ -11,7 +11,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { Show, UserButton } from '@clerk/react'
-import { deleteDocument, getHealth, listDocuments, uploadDocument } from './api'
+import { deleteDocument, getChunks, getHealth, listDocuments, uploadDocument } from './api'
 import { Landing } from './components/Landing'
 import { Mascot } from './components/Mascot'
 import './styles/global.css'
@@ -86,6 +86,22 @@ export default function App() {
         if (ignore) return
         setDocs(rows)
         setDocsStatus('ready')
+
+        // If the open note is not in the list any more, close the panel.
+        // handleDelete covers the note YOU deleted; this covers the note
+        // somebody else deleted, which is reachable because every document is
+        // shared by everyone — two tabs, or two laptops on demo day. Without
+        // it the panel keeps showing a deleted note's pieces, under a heading
+        // that has quietly fallen back to the generic "Pieces" because the
+        // document it named is gone.
+        //
+        // The function form, not `rows.some((r) => r.id === selectedId)`.
+        // selectedId is not in this effect's dependency list, so the value
+        // captured here would be whatever it was when the load started — and
+        // clicking a note while the list is in flight would then close the
+        // panel that had just been opened. The updater is handed the current
+        // value instead.
+        setSelectedId((current) => (rows.some((row) => row.id === current) ? current : null))
       })
       .catch(() => {
         if (ignore) return
@@ -96,6 +112,65 @@ export default function App() {
       ignore = true
     }
   }, [reloadKey])
+
+  // -------------------------------------------------------------------------
+  // Slice 2 — issue #10. Click a note, see the pieces it was cut into.
+  // -------------------------------------------------------------------------
+
+  // Which note is open, by id, or null when none is. Storing the *id* rather
+  // than the note object matters: the object in `docs` is replaced every time
+  // the list reloads, so a stored object would quietly go stale and stop
+  // matching the row it came from. An id stays true.
+  const [selectedId, setSelectedId] = useState(null)
+
+  // Derived from state, not stored alongside it. Keeping a second piece of
+  // state for "the selected document" would mean two things to keep in step,
+  // and they would drift the moment the list reloaded. Work it out on each
+  // render instead — it is one array lookup.
+  const selectedDoc = docs.find((d) => d.id === selectedId)
+
+  const [chunks, setChunks] = useState([])
+  const [chunksStatus, setChunksStatus] = useState('idle') // idle | loading | ready | failed
+
+  // This is the new idea in #10: an effect that re-runs when a *value* changes,
+  // rather than once on load. `selectedId` is in the dependency list, so every
+  // time it changes React tears down the previous run and starts this again.
+  //
+  // The `ignore` flag is the same guard as the notes list above, and it earns
+  // its keep more here. Click note A then quickly note B, and two requests are
+  // in flight; if A's answer arrives second it would land on top of B's pieces
+  // and the screen would show B selected with A's contents. The flag makes the
+  // stale run drop its result on the floor.
+  useEffect(() => {
+    if (selectedId === null) {
+      setChunks([])
+      setChunksStatus('idle')
+      return
+    }
+
+    let ignore = false
+    setChunksStatus('loading')
+
+    getChunks(selectedId)
+      .then((rows) => {
+        if (ignore) return
+        setChunks(rows)
+        setChunksStatus('ready')
+      })
+      .catch(() => {
+        if (ignore) return
+        setChunksStatus('failed')
+      })
+
+    return () => {
+      ignore = true
+    }
+  }, [selectedId])
+
+  /** Open a note, or close it if it is already open. */
+  function toggleSelected(id) {
+    setSelectedId((current) => (current === id ? null : id))
+  }
 
   /** #5 — runs when a file has been chosen in the hidden input. */
   async function handleFileChosen(event) {
@@ -152,6 +227,11 @@ export default function App() {
       // filter returns a new array and leaves the old one alone, which is what
       // React wants — the same "a new value, not a changed one" idea as above.
       setDocs((current) => current.filter((d) => d.id !== id))
+
+      // If the note that was open is the one just deleted, close the panel.
+      // Without this the pieces of a note that no longer exists stay on screen,
+      // and the next reload would ask the backend for it and get a 404.
+      setSelectedId((current) => (current === id ? null : current))
     } catch {
       setNotice('Could not delete that note. Try again in a moment.')
     }
@@ -301,7 +381,30 @@ export default function App() {
                   borderBottom: '2px solid var(--border, #eee)',
                 }}
               >
-                <span style={{ flex: 1 }}>{doc.filename}</span>
+                {/*
+                  A <button>, not a <div onClick>. It has to be reachable by Tab
+                  and operable with Enter and Space, and a real button is all
+                  three for free — see the accessibility floor in docs/design.md.
+                  aria-expanded tells a screen reader that this control opens
+                  something, and whether it is open right now.
+                */}
+                <button
+                  type="button"
+                  onClick={() => toggleSelected(doc.id)}
+                  aria-expanded={selectedId === doc.id}
+                  style={{
+                    flex: 1,
+                    textAlign: 'left',
+                    background: 'none',
+                    border: 'none',
+                    font: 'inherit',
+                    color: 'inherit',
+                    cursor: 'pointer',
+                    padding: 0,
+                  }}
+                >
+                  {doc.filename}
+                </button>
                 <span style={{ color: 'var(--text-muted)' }}>
                   {doc.page_count} {doc.page_count === 1 ? 'page' : 'pages'}
                 </span>
@@ -318,6 +421,100 @@ export default function App() {
           </ul>
         )}
       </section>
+
+      {/*
+        Slice 2 — issue #10. The pieces the selected note was cut into.
+
+        Rendered only when something is selected, so the very first thing anyone
+        sees is still the notes list and not an empty panel asking to be filled.
+        Plain boxes for now: a page number and the text. Slice 5 makes it pretty.
+      */}
+      {selectedId !== null && (
+        <section className="card" style={{ marginTop: 'var(--gap-lg)' }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--gap)',
+              marginBottom: 'var(--gap)',
+            }}
+          >
+            <h2 style={{ margin: 0 }}>{selectedDoc ? `Inside ${selectedDoc.filename}` : 'Pieces'}</h2>
+
+            <button
+              type="button"
+              className="btn btn--secondary"
+              style={{ marginLeft: 'auto' }}
+              onClick={() => setSelectedId(null)}
+            >
+              Close
+            </button>
+          </div>
+
+          <p style={{ color: 'var(--text-muted)', marginTop: 0 }}>
+            Nibble cuts every note into overlapping pieces, so a search can point at a
+            paragraph instead of a whole chapter. Consecutive pieces repeat a little of
+            each other on purpose — a sentence cut in half still sits whole in one of them.
+          </p>
+
+          {chunksStatus === 'loading' && (
+            <p style={{ color: 'var(--text-muted)' }}>Fetching the pieces…</p>
+          )}
+
+          {chunksStatus === 'failed' && (
+            <p style={{ color: 'var(--danger, #b3261e)' }}>
+              Could not load the pieces. Check the backend is running, then click the note
+              again.
+            </p>
+          )}
+
+          {chunksStatus === 'ready' && chunks.length === 0 && (
+            <p style={{ color: 'var(--text-muted)', marginBottom: 0 }}>
+              This note has no pieces. Anything uploaded before chunking existed is like
+              this — delete it and upload it again.
+            </p>
+          )}
+
+          {chunksStatus === 'ready' && chunks.length > 0 && (
+            <>
+              <p style={{ color: 'var(--text-muted)' }}>
+                {chunks.length} {chunks.length === 1 ? 'piece' : 'pieces'}
+              </p>
+
+              <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+                {chunks.map((chunk) => (
+                  <li
+                    key={chunk.id}
+                    style={{
+                      border: '2px solid var(--border, #eee)',
+                      borderRadius: 'var(--radius, 8px)',
+                      padding: 'var(--gap-sm)',
+                      marginBottom: 'var(--gap-sm)',
+                    }}
+                  >
+                    <p
+                      style={{
+                        margin: 0,
+                        marginBottom: 'var(--gap-sm)',
+                        color: 'var(--text-muted)',
+                        fontFamily: 'var(--font-display)',
+                      }}
+                    >
+                      Page {chunk.page}
+                    </p>
+                    {/*
+                      whiteSpace: pre-wrap keeps the line breaks that were in the
+                      original page. Without it the browser collapses every run of
+                      whitespace and a page of notes arrives as one long paragraph.
+                    */}
+                    <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{chunk.content}</p>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </section>
+      )}
         </main>
       </Show>
     </>
