@@ -122,16 +122,49 @@ PR #27 added Clerk authentication to the frontend and merged on 2026-08-29. It h
 in `main` and pretending otherwise makes this file a worse map than no map.
 
 It is not folded into a slice retroactively — inventing a slice after the fact would
-make the plan look like it predicted something it did not. What it needs is a decision,
-and the decision is owed before Slice 4:
+make the plan look like it predicted something it did not. What it needed was a
+decision, and the decision is now made — see below.
 
-- Sign-in currently gates the UI but **no backend route checks anything.** Anyone who
-  can reach `:8000` can upload, list and — once #6 lands — delete. If that is fine for
-  a demo on a laptop, write that down here; if it is not, it needs an issue.
-- Every document is currently shared by everyone. There is no `user_id` on `documents`.
-  Adding one later means reshaping a table that has rows in it, which is the same chore
-  the `chunks` table was created early to avoid.
+### Decision, 2026-09-07: the backend stays open, on purpose
+
+**Clerk gates the UI and nothing else. We are keeping it that way through the demo.**
+
+This came up again while merging the landing page (PR #34), which wraps the app in
+`<Show when="signed-out">`. That is worth having for how the product reads, but it
+should not be mistaken for a gate. Checked against the running backend, with no
+credentials sent at all:
+
+```
+GET http://localhost:8000/documents  ->  200, the real list of notes
+```
+
+`backend/app/routes.py` has no `Depends`, no token check, no `Authorization` header
+anywhere, so `POST /documents` and `DELETE /documents/{id}` are open in the same way.
+`documents` has no `user_id` either — every note belongs to everybody.
+
+Why we are accepting that:
+
+- The demo runs on one laptop. Nothing is deployed, `:8000` is not reachable from
+  anywhere else, and there is no real user data in the database.
+- Real auth is not small. It is Clerk token verification on every route, a `user_id`
+  column, and reshaping a table that already has rows in it — the exact chore the
+  `chunks` table was created early to avoid. That is a slice, and it would come out
+  of Slices 3 and 4, which are the ones the demo actually depends on.
+- The demo is safe from the end of Slice 4. Spending that time on auth risks the
+  thing we are being marked on to fix something nobody can reach.
+
+What this costs us, stated plainly so nobody is surprised at the demo:
+
+- **Do not deploy this anywhere public as it stands.** The moment it is reachable
+  from outside the laptop, this decision is wrong and has to be revisited first.
+- Two people signed into different Clerk accounts on the same backend see the same
+  notes. That is not a bug to file; it is this decision showing through.
+- If somebody asks at the demo "what stops me reading your notes?", the honest answer
+  is "nothing yet, and here is what it would take" — pointing at this section. That
+  is a better answer than pretending the sign-in page does something it does not.
 - Clerk is free at this scale, so the "everything is free" rule still holds.
+
+Revisit this if the project is ever deployed, or if Slices 3-6 finish early.
 
 ## What was fixed in review, 2026-09-06
 
