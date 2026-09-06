@@ -55,7 +55,7 @@ already closed.
 | 0   | The two programs talk | —                         | done, merged            |
 | 1   | Upload and list       | Slice 1 — Upload and list | done, merged            |
 | 1.5 | Handwriting and scans | — (unplanned)             | done, merged            |
-| 2   | Chunking              | Slice 2 — Chunking        | built, not merged       |
+| 2   | Chunking              | Slice 2 — Chunking        | done, merged            |
 | 3   | Search, no AI yet     | Slice 3 — Search          | open                    |
 | 4   | Nibble answers        | Slice 4 — Nibble answers  | open                    |
 | 5   | Make it Nibble        | Slice 5 — Make it Nibble  | open                    |
@@ -68,30 +68,63 @@ dropped if time runs out.
 "osmosis" and watching the right paragraph surface. It's the moment RAG stops being
 magic, and it's a working demo on its own even if everything after it fails.
 
-## Current state, 2026-09-06 (evening)
+## Current state, 2026-09-07
 
-`main` is at `c55260d`, and Slice 2 is built on `feat/slice-2-chunking` and not
-yet merged. **Every earlier pull request has merged — there are none
-left.** #24, #25, #28, #29, #30 and #31 all landed today, after the queue had sat
-untouched for four weeks.
+`main` is at `fa5f086`. **Slices 0, 1, 1.5 and 2 are all merged and working.**
+Upload a PDF, a text file, a Markdown file or a photo; see it listed; open it and
+read the pieces it was cut into; delete it. A scanned or handwritten PDF gets read
+by a vision model instead of silently arriving empty.
 
-Slices 0, 1 and 1.5 are in `main` and work. You can upload a PDF, a text file, a
-Markdown file or a photo, see it listed, and delete it — and a scanned or
-handwritten PDF gets read by a vision model instead of silently arriving empty.
+**Slice 3 is next and Fahim is taking it.** Everything it needs is in `main`.
 
-### The board now agrees with the code
+### Read this before starting slice 3
+
+- **#8, #9 and #10 are still open on GitHub**, even though PR #33 merged. An issue
+  is done when it is closed, so the board currently understates slice 2 exactly the
+  way it understated slice 1. **Close them.** Second time, which makes it a habit
+  rather than an oversight.
+- **#11 is assigned to Alif, not Fahim.** `embeddings.py` is a tech-lead file in
+  [`team.md`](./team.md) because model loading and threading have non-obvious
+  failure modes. If Fahim takes all of slice 3 then #11 and that table both move; if
+  he takes #12 and #13, they do not. Nobody has said which, and it is the first
+  thing slice 3 will trip over.
+- **Issue #8's text still says `chunk_pages(pages: list[str])`** while the merged
+  code takes `list[tuple[int, str]]`. The board is wrong, not the code.
+- **Slice 3 gets scaffolded, not solved.** Alif writing all of slice 2 was a
+  one-off; the work is Fahim's again, and the pull request gate is *explain this in
+  your own words*.
+- **A chunk here is often a whole page.** `ch1 DB.pdf` averages 481 characters a
+  page, comfortably under `CHUNK_SIZE`, so all 31 of its pieces are page-sized and
+  the overlap never came into play. Slice 3 is embedding *those*, not tidy
+  900-character windows.
+
+### The landing page arrived outside the plan, and collided
+
+Arman opened PR #34, a **gated landing page for signed-out users** — `+317 / -16`
+across `App.jsx`, a new `Landing.jsx` and `landing.css`. It has **no slice, no issue
+and no `api.md` entry**, making it the second thing to arrive outside the plan after
+Clerk.
+
+It edits `App.jsx`, which slice 2 rewrote, so the two conflicted — and that is
+already being resolved on `fix/landing-page-merge`, which merges `main` into the
+landing page while keeping the pieces panel. Worth knowing because slice 3 touches
+the frontend too, and `App.jsx` is now the file three separate pieces of work all
+want.
+
+It is not folded into a slice retroactively, for the same reason Clerk was not:
+inventing a slice afterwards makes the plan look like it predicted something it did
+not.
+
+### The board still understates the work
 
 **22 issues, 6 closed** — #2, #3, #4, #5, #6 and #7. They were built and merged
-weeks apart from being closed, and for a while this file said so while the board
-did not. That gap is shut.
+weeks apart from being closed, and for a while this file said so while the board did
+not. That gap was shut, and then slice 2 opened it again, because #8, #9 and #10
+stayed open straight through their own merge.
 
-The rule that produced the fix is worth keeping: an issue is done when it is
-closed, not when a box here is ticked. Saying the two disagreed out loud, rather
-than quietly ticking the boxes, is what got them closed.
+The rule keeps being the thing that slips, so it is worth restating plainly: an
+issue is done when it is closed, not when a box here is ticked.
 
-Slice 2's three issues (#8, #9, #10) are **built but still open**, and stay open
-until the pull request merges. Slice 3 is next and Fahim is taking it, which ends
-the one-off where Alif wrote all of slice 2 — see the note under Slice 3.
 
 ### Two things that are true and easy to misread as "finished"
 
@@ -512,8 +545,13 @@ is not being pulled forward**, and the reasoning is there too.
 Cut documents into pieces small enough to search. Contract in [`api.md`](./api.md)
 under "Slice 2".
 
-**Built 2026-09-06**, on branch `feat/slice-2-chunking`. Not merged — the three
-issues are still open on GitHub, and they close when the PR does.
+**Built and merged 2026-09-06**, as PR #33 from `feat/slice-2-chunking`.
+
+The boxes below stay unticked, and that is deliberate. **#8, #9 and #10 are still
+open on GitHub.** The rule at the top of this file is that an issue is done when it
+is closed and not when a box here is ticked, and ticking them while the board says
+otherwise is the exact drift this file exists to catch. Close the issues and the
+boxes follow.
 
 - [ ] #8 `chunk_pages()` and its tests
 - [ ] #9 Save chunks on upload, add `GET /documents/{id}/chunks`
@@ -695,16 +733,30 @@ evidence this slice works on something nobody constructed for it:
   first written, that page would have been deleted without a word. It is kept,
   which is the correction working on real input rather than in a test.
 
-### Still open on this slice
+### Signed off, and exactly what that rests on
 
-- [ ] **Nobody has clicked it in a browser.** Lint and the production build are
-      clean and the backend answers correctly with CORS for
-      `http://localhost:5173`, but no person has opened a note and looked at the
-      panel. That is the one thing left here, and it is a person's job.
-- [ ] **Issue #8 still says `chunk_pages(pages: list[str])`** on GitHub, and the
-      code takes `list[tuple[int, str]]`. The board is wrong, not the code — see
-      the decision above. One line to correct.
-- [ ] **#8, #9 and #10 close when the pull request merges**, not before.
+Slice 2 is **called done on the tech lead's judgement**, not on a finished
+checklist. Worth being precise about the difference so nobody later reads more into
+it than is there.
+
+**Verified:** the whole backend path on a real 31-page textbook, 72 tests, lint,
+format, the production build, and all three panel states answering correctly over
+HTTP with CORS from `http://localhost:5173`.
+
+**Not verified: the rendering.** Nobody opened a note in a browser and looked at
+the panel. Every piece of data it consumes is confirmed correct, so the remaining
+risk sits entirely in the JSX — but it was *accepted*, not closed, and if the panel
+misbehaves in front of an audience this is the paragraph that predicted it. Thirty
+seconds settles it: click a note, expect a heading, a piece count, and boxes reading
+"Page 1", "Page 2".
+
+That is the same shape of gap as slice 1.5's, where a file was uploaded, appeared in
+the list, and was read as proof of a feature that had never run. The difference is
+that this one is written down before the demo rather than after.
+
+**Also still open:** issue #8's text says `chunk_pages(pages: list[str])` and the
+merged code takes `list[tuple[int, str]]`. One line to correct on GitHub.
+
 
 ## Slice 3: Search — no AI yet
 
