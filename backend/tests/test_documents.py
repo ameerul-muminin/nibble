@@ -205,12 +205,44 @@ def test_upload_with_directory_traversal_filename_stays_in_uploads(client, tmp_p
 
 
 def test_upload_with_windows_style_traversal_filename(client, tmp_path):
-    """The same thing, written the Windows way with backslashes."""
+    """The same thing, written the Windows way with backslashes.
+
+    This one is why the cleaning does not just call Path(...).name: on Linux a
+    backslash is an ordinary character in a filename, so Path would hand the
+    whole dangerous string straight back.
+    """
     response = client.post(
         "/documents",
         files={"file": (r"..\..\escaped-win.txt", b"Nor should I.", "text/plain")},
     )
 
     assert response.status_code == 201
-    assert "/" not in response.json()["filename"]
-    assert "\\" not in response.json()["filename"]
+    assert response.json()["filename"] == "escaped-win.txt"
+    assert (tmp_path / "uploads" / "escaped-win.txt").exists()
+
+
+def test_safe_filename_strips_directories_on_either_separator():
+    """The helper on its own, without going through HTTP.
+
+    Every one of these has to give the same answer on Windows and on Linux,
+    which is the whole reason the helper exists.
+    """
+    from app.routes import _safe_filename
+
+    assert _safe_filename("notes.txt") == "notes.txt"
+    assert _safe_filename("../../escaped.txt") == "escaped.txt"
+    assert _safe_filename(r"..\..\escaped.txt") == "escaped.txt"
+    assert _safe_filename("/etc/passwd") == "passwd"
+    assert _safe_filename(r"C:\Windows\System32\evil.dll") == "evil.dll"
+    assert _safe_filename("a/b/c/notes.md") == "notes.md"
+
+
+def test_safe_filename_falls_back_when_nothing_usable_is_left():
+    """ "../.." and friends leave no name behind at all."""
+    from app.routes import _safe_filename
+
+    assert _safe_filename(None) == "unnamed"
+    assert _safe_filename("") == "unnamed"
+    assert _safe_filename("../..") == "unnamed"
+    assert _safe_filename("...") == "..."  # a real, if odd, filename
+    assert _safe_filename("/") == "unnamed"

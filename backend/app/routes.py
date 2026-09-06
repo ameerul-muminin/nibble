@@ -17,7 +17,7 @@ testable without starting a server.
 """
 
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from fastapi import APIRouter, HTTPException, UploadFile, status
 
@@ -52,6 +52,34 @@ def health():
 # ---------------------------------------------------------------------------
 
 
+def _safe_filename(raw: str | None) -> str:
+    r"""Turn a filename the browser sent into one we are willing to write to disk.
+
+    The browser chooses this value, which means an attacker chooses it too. A
+    name like "../../config.py" would walk straight out of the uploads directory
+    and land on a real file. So we keep only the last piece of it and throw away
+    every directory part.
+
+    The reason this replaces backslashes first, rather than just calling
+    ``Path(raw).name``, is that ``Path`` means different things on different
+    machines. On Windows both / and \ separate directories, so ``Path`` strips
+    both. On Linux — which is what CI and any server run — a backslash is an
+    ordinary character in a filename, so ``Path("..\..\x.txt").name`` hands
+    back the whole string unchanged and the dangerous name survives. Normalising
+    first means the answer does not depend on where the code happens to run.
+
+    Security code that only works on the machine you wrote it on is not security
+    code. CI caught exactly this, which is what CI is for.
+    """
+    name = PurePosixPath((raw or "").replace("\\", "/")).name
+
+    # "../.." leaves nothing behind, and "." and ".." are not usable names.
+    if name in ("", ".", ".."):
+        return "unnamed"
+
+    return name
+
+
 @router.post("/documents", status_code=status.HTTP_201_CREATED)
 async def upload_document(file: UploadFile):
     """Upload a PDF, TXT, or MD file and save it as a document.
@@ -67,12 +95,7 @@ async def upload_document(file: UploadFile):
     and there is no sync equivalent. If you write a new route, write ``def``.
     """
     # --- Work out a filename we can trust ---------------------------------
-    # The browser sends the filename, which means an attacker can send anything
-    # they like. A name like "../../config.py" would walk straight out of the
-    # uploads directory and overwrite a real file. Path(...).name throws away
-    # every directory part and keeps only the last piece, so "../../x.txt"
-    # becomes "x.txt". Never write a path built from a value the client sent.
-    filename = Path(file.filename or "unnamed").name
+    filename = _safe_filename(file.filename)
 
     # --- Validate the extension -------------------------------------------
     suffix = Path(filename).suffix.lower()
