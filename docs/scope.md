@@ -55,7 +55,7 @@ already closed.
 | 0   | The two programs talk | —                         | done, merged            |
 | 1   | Upload and list       | Slice 1 — Upload and list | done, merged            |
 | 1.5 | Handwriting and scans | — (unplanned)             | done, merged            |
-| 2   | Chunking              | Slice 2 — Chunking        | open                    |
+| 2   | Chunking              | Slice 2 — Chunking        | built, not merged       |
 | 3   | Search, no AI yet     | Slice 3 — Search          | open                    |
 | 4   | Nibble answers        | Slice 4 — Nibble answers  | open                    |
 | 5   | Make it Nibble        | Slice 5 — Make it Nibble  | open                    |
@@ -70,7 +70,8 @@ magic, and it's a working demo on its own even if everything after it fails.
 
 ## Current state, 2026-09-06 (evening)
 
-`main` is at `b95aee2`. **Every open pull request has merged — there are none
+`main` is at `c55260d`, and Slice 2 is built on `feat/slice-2-chunking` and not
+yet merged. **Every earlier pull request has merged — there are none
 left.** #24, #25, #28, #29, #30 and #31 all landed today, after the queue had sat
 untouched for four weeks.
 
@@ -78,28 +79,30 @@ Slices 0, 1 and 1.5 are in `main` and work. You can upload a PDF, a text file, a
 Markdown file or a photo, see it listed, and delete it — and a scanned or
 handwritten PDF gets read by a vision model instead of silently arriving empty.
 
-### The board disagrees with the code, and the board is what counts
+### The board now agrees with the code
 
-**22 issues, 1 closed.** Only #5 is closed. **#2, #3, #4, #6 and #7 are all built
-and merged into `main`, and all still open on GitHub.**
+**22 issues, 6 closed** — #2, #3, #4, #5, #6 and #7. They were built and merged
+weeks apart from being closed, and for a while this file said so while the board
+did not. That gap is shut.
 
-The checkboxes below stay unticked, because the rule at the top of this file is
-that an issue is done when it is closed and not when a box here is ticked. Saying
-it out loud rather than quietly ticking them is the point. **Those five issues
-should be closed**, and until they are, this project looks from the outside like
-it has finished one thing in five weeks.
+The rule that produced the fix is worth keeping: an issue is done when it is
+closed, not when a box here is ticked. Saying the two disagreed out loud, rather
+than quietly ticking the boxes, is what got them closed.
+
+Slice 2's three issues (#8, #9, #10) are **built but still open**, and stay open
+until the pull request merges.
 
 ### Two things that are true and easy to misread as "finished"
 
-**The extracted text is currently thrown away.** `extract_text` runs only to count
-pages; nothing stores the words. `chunks` is empty. So a 31-page upload today
-holds a filename, a page count and a date, and not one searchable word. That is
-Slice 2's job and it is not built — but it means an upload that *looks* completely
-successful has produced nothing to search yet.
+**The extracted text used to be thrown away — Slice 2 fixed that.** `extract_text`
+ran only to count pages and nothing stored the words, so an upload that looked
+completely successful produced not one searchable word, and a scan spent vision
+tokens on every page and discarded the result.
 
-It also means a scanned upload spends vision tokens transcribing every page and
-then discards the result. Harmless while testing; worth fixing early in Slice 2
-rather than after somebody burns a day's allowance on it.
+Chunking now runs inside the same upload request and stores the pieces. **What is
+still true is that anything uploaded before Slice 2 has no chunks** — `ch1 DB.pdf`
+is exactly that, and it comes back from the chunks endpoint as an empty list. It is
+not being backfilled; delete it and upload it again.
 
 **A note appearing in the list is not proof the text came out.** The first real
 upload after the merge was `ch1 DB.pdf` — 31 pages, listed, looking perfect. It
@@ -508,9 +511,126 @@ is not being pulled forward**, and the reasoning is there too.
 Cut documents into pieces small enough to search. Contract in [`api.md`](./api.md)
 under "Slice 2".
 
-- [ ] #8 `chunk_text()` and its tests _(Fahim)_
-- [ ] #9 Save chunks on upload, add `GET /documents/{id}/chunks` _(Fahim)_
-- [ ] #10 Click a note and see its chunks _(Arman)_
+**Built 2026-09-06**, on branch `feat/slice-2-chunking`. Not merged — the three
+issues are still open on GitHub, and they close when the PR does.
+
+- [ ] #8 `chunk_pages()` and its tests
+- [ ] #9 Save chunks on upload, add `GET /documents/{id}/chunks`
+- [ ] #10 Click a note and see its chunks
+
+### Ownership changed here
+
+Alif took ownership of all the code for this slice, so it is written out in full
+rather than scaffolded with `TODO(name)` the way slice 1 was. That is a real
+change to the arrangement in [`team.md`](./team.md) and the table there still
+says otherwise — **the table is the authority, so either it gets updated or this
+slice is a one-off exception.** Whichever it is, someone has to say so; leaving
+the two disagreeing is how the mirror rots.
+
+The names have been dropped from the checklist above for the same reason.
+
+### Decided
+
+**`chunk_pages(pages: list[tuple[int, str]])`, not `list[str]`.** Issue #8 as
+written asked for `list[str]`, which disagreed with what `extract_text()` already
+returns. Matching the code means the upload route hands one function straight to
+the other with no conversion step, and the page number is carried as a fact rather
+than inferred from a list position. **Issue #8's text is wrong and needs the
+one-line correction** — recorded here rather than quietly fixed in passing.
+
+**A piece never spans two pages.** Every chunk carries the page it came from, and
+slice 4 shows that number to a student as "p. 4". The cheap way to keep it honest
+is to never let a window straddle a page boundary. The cost is that a short page
+gives a short piece, which is fine.
+
+**Fixed-size character windows, nothing cleverer.** No sentence detection, no
+paragraph splitting, no tokeniser. `CHUNK_SIZE` characters, then step forward by
+`CHUNK_SIZE - CHUNK_OVERLAP`. It is six lines of real work and it is explainable
+at the demo, which is worth more here than the last few percent of retrieval
+quality.
+
+**The document and its chunks are written in one transaction, one commit.**
+Committing the document first would open a window where it exists with no pieces,
+and a failure in the chunk insert would leave that window open forever — an upload
+that looks finished and can never be searched. Either both land or neither does.
+
+**`GET /documents/{id}/chunks` asks the database two questions.** A single SELECT
+against `chunks` cannot tell "no such document" apart from "a document with no
+pieces" — both come back empty — and those deserve different answers. So it checks
+the document exists first, and 404s with the same sentence `DELETE` uses.
+
+**No backfill for anything uploaded before today.** `ch1 DB.pdf` is in the dev
+database with a page count and zero chunks, and it stays that way. A migration
+nobody runs twice costs more than deleting the note and uploading it again. The UI
+says so in plain words rather than showing an unexplained empty panel.
+
+### The rule that was wrong, and what the tests caught
+
+The first version dropped **any** piece shorter than 40 characters. It looked
+sensible and it was wrong twice over, and the existing slice 1 tests failed loudly
+enough to show it:
+
+- It deleted every title-only slide in a deck. "Chapter 4: Concurrency" is real
+  searchable content with a real page number, not noise.
+- It refused a legitimate small upload outright. `notes.txt` containing one
+  sentence produced no chunks at all, so the upload 400'd.
+
+The arithmetic nobody did first: with `CHUNK_OVERLAP` at 150, the loop always stops
+a step early, so **the last piece of a page is always longer than 150 characters.**
+A piece under 40 characters can therefore only ever be a whole short page — which
+means the rule, as written, did nothing but delete short pages.
+
+So `MIN_CHUNK_CHARS` now applies only to a piece that is **not the first piece of
+its page**. Every page with any text produces at least one chunk. The rule still
+earns its place as a guard for a hand-edited config with a small overlap, where a
+genuine 11-character scrap can appear — there is a test that forces exactly that.
+
+**Worth keeping:** the reasoning for the original rule was fine and the conclusion
+was still wrong, because nobody checked whether the case it described could happen.
+It could not.
+
+### A silent failure that is now loud
+
+An upload whose chunks come back empty is refused with a sentence, rather than
+stored. That is the same failure shape slice 1.5 exists to remove — a note that
+lists perfectly and matches no search — arriving by a different route.
+
+With the current settings the branch is unreachable, because every page with text
+produces a piece. It is kept anyway, with a test that stubs `chunk_pages` to return
+nothing, so that a future change to chunking fails a test instead of quietly filling
+the list with unsearchable notes.
+
+### Checklist
+
+- [x] `backend/app/chunking.py` — `chunk_pages()`, the window loop, `MIN_CHUNK_CHARS`
+- [x] A guard that fails loudly if `CHUNK_OVERLAP >= CHUNK_SIZE`, which would
+      otherwise hang the server building identical pieces forever
+- [x] `backend/tests/test_chunking.py` — 13 tests, including overlap, no gaps
+      between pieces, page numbers surviving, and nothing stored twice
+- [x] `POST /documents` chunks the text and stores it with `executemany()`
+- [x] `GET /documents/{document_id}/chunks`, with the 404
+- [x] 9 more route tests. **70 tests pass**, up from 48
+- [x] `getChunks(id)` in `api.js`
+- [x] `App.jsx`: click a note to open it, a `useEffect` keyed on `selectedId`,
+      loading, failed, empty and populated states, and Close
+- [x] `docs/api.md` — Slice 2 moved from planned to built, and the 404 pinned
+- [x] `ruff check`, `ruff format --check`, `npm run lint`, `npm run build` all clean
+
+### Verified by actually running it
+
+A 1769-character note through the real running server: **3 pieces, 900 / 900 / 266
+characters, all page 1.** The head of piece 2 appears inside piece 1, so the overlap
+is real and not just asserted in a test. `GET /documents/999/chunks` returns the
+404 sentence; deleting a document and asking again returns the same, so the cascade
+works through the endpoint and not only against the table.
+
+`ch1 DB.pdf`, uploaded before this slice existed, returns `200` and `[]` — the
+empty-pieces case, live, exactly as predicted above.
+
+**Not verified: the browser.** Lint and the production build are clean and the
+backend answers correctly with CORS for `http://localhost:5173`, but nobody has
+clicked a note and looked at the panel yet. That is the one thing left on this
+slice, and it is a person's job.
 
 ## Slice 3: Search — no AI yet
 
