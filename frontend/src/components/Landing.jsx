@@ -38,17 +38,17 @@ export function Landing() {
           <Mascot size={44} mood="idle" />
           <span className="landing-word">Nibble</span>
         </div>
+        {/*
+          Sign in only. "Start learning" lives in the hero and nowhere else —
+          two primary buttons on one screen compete, and the eye has to pick.
+          Returning users look to the top right, new ones read the hero.
+        */}
         <div className="landing-nav-actions">
           <SignInButton mode="modal">
             <button type="button" className="btn btn--secondary">
               Sign in
             </button>
           </SignInButton>
-          <SignUpButton mode="modal">
-            <button type="button" className="btn btn--primary">
-              Start learning
-            </button>
-          </SignUpButton>
         </div>
       </header>
 
@@ -72,11 +72,6 @@ export function Landing() {
                   Start learning
                 </button>
               </SignUpButton>
-              <SignInButton mode="modal">
-                <button type="button" className="btn btn--secondary">
-                  I have notes
-                </button>
-              </SignInButton>
             </div>
             <p className="landing-micro">Free. No card. Your PDFs stay yours.</p>
           </div>
