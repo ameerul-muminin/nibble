@@ -53,7 +53,7 @@ already closed.
 | #   | Slice                 | Milestone                 | Status                  |
 | --- | --------------------- | ------------------------- | ----------------------- |
 | 0   | The two programs talk | —                         | done, merged            |
-| 1   | Upload and list       | Slice 1 — Upload and list | in progress, 2 PRs open |
+| 1   | Upload and list       | Slice 1 — Upload and list | in progress, 2 PRs ready |
 | 2   | Chunking              | Slice 2 — Chunking        | open                    |
 | 3   | Search, no AI yet     | Slice 3 — Search          | open                    |
 | 4   | Nibble answers        | Slice 4 — Nibble answers  | open                    |
@@ -67,21 +67,94 @@ dropped if time runs out.
 "osmosis" and watching the right paragraph surface. It's the moment RAG stops being
 magic, and it's a working demo on its own even if everything after it fails.
 
-## Current state, 2026-08-29
+## Current state, 2026-09-06
 
-22 issues, 0 closed. `main` is at `6afb799` and carries Slice 0.
+**Correcting the mirror.** The section below used to say "three pull requests are
+open, and nothing has merged in three weeks", dated 2026-08-29. That was wrong on the
+day it was written: #26 and #27 had both already merged. GitHub wins on status, so
+this is the correction, said out loud rather than quietly fixed — which is exactly the
+failure mode the rule at the top of this file exists to catch.
 
-**Three pull requests are open, and nothing has merged in three weeks.** That is the
-project's actual bottleneck — not a missing feature.
+22 issues, **0 closed**. `main` is at `683a7ed`.
 
-| PR  | Branch                      | Opened     | Note                        |
-| --- | --------------------------- | ---------- | --------------------------- |
-| #24 | `feat/extract-text`         | 2026-08-09 | Must merge before #25       |
-| #25 | `feat/upload-list-documents` | 2026-08-10 | Stacked on #24              |
-| #26 | `chore/workflow-skills`     | 2026-08-20 | Shared skills for the team  |
+| PR  | Branch                       | Opened     | State                                  |
+| --- | ---------------------------- | ---------- | -------------------------------------- |
+| #24 | `feat/extract-text`          | 2026-08-09 | open, review findings fixed, CI green  |
+| #25 | `feat/upload-list-documents` | 2026-08-10 | open, review findings fixed, CI green  |
+| #26 | `chore/workflow-skills`      | 2026-08-20 | **merged** 2026-08-29                  |
+| #27 | `feat/clerk-auth`            | —          | **merged** 2026-08-29                  |
 
-Review order is forced: **#24, then #25.** Unblocking these comes before starting
-anything new.
+Review order is still **#24, then #25**. #25 contains #24's commit and targets `main`
+directly, so merging #25 alone would land both — #24 goes first anyway, so the
+authorship of each piece stays visible.
+
+**No issue has ever been closed.** Twenty-two open, zero done, across five weeks. The
+bottleneck is the review queue, not a missing feature, and it stays the bottleneck
+until #24 and #25 land.
+
+### Clerk sign-in landed outside the plan
+
+PR #27 added Clerk authentication to the frontend and merged on 2026-08-29. It has
+**no slice, no issue, and no `docs/api.md` entry.** It is recorded here because it is
+in `main` and pretending otherwise makes this file a worse map than no map.
+
+It is not folded into a slice retroactively — inventing a slice after the fact would
+make the plan look like it predicted something it did not. What it needs is a decision,
+and the decision is owed before Slice 4:
+
+- Sign-in currently gates the UI but **no backend route checks anything.** Anyone who
+  can reach `:8000` can upload, list and — once #6 lands — delete. If that is fine for
+  a demo on a laptop, write that down here; if it is not, it needs an issue.
+- Every document is currently shared by everyone. There is no `user_id` on `documents`.
+  Adding one later means reshaping a table that has rows in it, which is the same chore
+  the `chunks` table was created early to avoid.
+- Clerk is free at this scale, so the "everything is free" rule still holds.
+
+## What was fixed in review, 2026-09-06
+
+Both open PRs were reviewed and the findings fixed on their branches rather than sent
+back, so Slice 1 stops being blocked. Each fix is one that **fails quietly rather than
+loudly**, which is why each got a test that fails against the old code:
+
+- [x] **Path traversal in `routes.py`.** Uploads were written using the filename the
+      browser sent, so `../../config.py` would have escaped the uploads directory.
+      Now cleaned through `_safe_filename()`, with tests verified failing before the
+      fix. **The first attempt at this fix was wrong, and CI caught it** — see below.
+- [x] **`PRAGMA foreign_keys = ON` in `db.py`.** SQLite defaults it OFF, *per
+      connection*. Without it `ON DELETE CASCADE` does nothing and says nothing, so
+      #6 would have looked correct while leaving orphaned chunks behind.
+- [x] **The `chunks` table, with its `embedding` column and index.** Created in
+      Slice 1 as already decided below, not in Slice 2.
+- [x] **Extension drift.** `.text` and `.markdown` were accepted by the code and
+      absent from `docs/api.md`. The contract won; a test now pins the three.
+- [x] **The one `async def`.** A comment now says why `upload_document` is the
+      exception, so it is understood rather than copied into the next route.
+- [x] Verified in the really running server, not just tests: `../../../pwned.txt`
+      stored as `pwned.txt`, `.markdown` rejected with 400, normal upload 201.
+
+**The bit worth keeping: `Path(...).name` is not the same function on every machine.**
+The first fix used it directly. It passed every test on Windows and failed on CI,
+because `pathlib` follows the rules of whatever platform it runs on — Windows treats
+both `/` and `\` as separators, Linux treats a backslash as an ordinary character in a
+filename. So the same line strips the path on a laptop and returns the whole dangerous
+string on a server.
+
+The cleaning now normalises separators before taking the last piece, so the answer is
+the same everywhere. Two things this is worth remembering for:
+
+- **Security code that only works on the machine you wrote it on is not security code.**
+  Local green meant nothing here; the Linux run was the real check.
+- It is a concrete answer to "why bother with CI when it passes on my laptop", which is
+  a fair thing to have been wondering.
+
+**Still open on these two PRs, and needing a person:**
+
+- [ ] **Both PR bodies are the unfilled template.** Every question blank, no boxes
+      ticked, #25 still auto-titled "Feat/upload list documents". The learning gate
+      has not actually been used yet, on either PR.
+- [ ] **`db.py` is issue #2, assigned to Alif, and Fahim wrote it in #25.** An
+      ownership boundary was crossed. Accepting it or reasserting it are both
+      defensible; picking neither is not.
 
 ## Slice 0: The two programs talk to each other
 
@@ -123,7 +196,9 @@ the table once, now, is cheaper than migrating a SQLite file later.
 **The allowed extensions and `api.md` must say the same thing.** They drifted once
 already — the code accepted `.text` and `.markdown` while the contract named only
 `.pdf`, `.txt`, `.md`. Pick one and change both. A contract that disagrees with the
-code is worse than no contract, because people trust it.
+code is worse than no contract, because people trust it. **Resolved 2026-09-06:** the
+contract won, the two extra extensions were dropped from `files.py` and `routes.py`,
+and a test now pins the three so they cannot drift apart again.
 
 **`async def` is the exception here, and only for `await file.read()`.** The project
 rule is sync routes so there is no async to explain. The upload route genuinely needs
@@ -131,7 +206,9 @@ it. Write the sentence saying why, so the exception is understood rather than co
 into the next route.
 
 **Same-name uploads currently overwrite each other silently.** Known, minor, not being
-fixed in this slice. Written down so it is not rediscovered later as a bug.
+fixed in this slice. Written down so it is not rediscovered later as a bug. Note this
+is now the *cleaned* name: two uploads called `a/notes.txt` and `b/notes.txt` both
+become `notes.txt` and collide, which is the same known behaviour, not a new bug.
 
 ### Checklist
 
