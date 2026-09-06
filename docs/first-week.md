@@ -92,7 +92,12 @@ copy .env.example .env
 cp .env.example .env
 ```
 
-You can leave it empty for now — the Groq key isn't needed until Slice 4.
+You can leave it empty for now. Everything works without it **except reading
+handwriting** — a scanned PDF or a photo of your notes needs the Groq key,
+because it is a picture and has to be read by a vision model rather than
+extracted. Typed PDFs, `.txt` and `.md` never touch it. Slice 4 needs it too.
+
+The key is free and does not ask for a card: <https://console.groq.com/keys>
 
 **Check.**
 

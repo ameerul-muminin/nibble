@@ -43,17 +43,53 @@ Every uploaded document, newest first.
 ### `POST /documents`
 
 Upload a file. `multipart/form-data`, field name `file`.
-Accepts `.pdf`, `.txt`, `.md`. Maximum 20 MB.
+Accepts `.pdf`, `.txt`, `.md`, and photos: `.png`, `.jpg`, `.jpeg`, `.webp`.
+Maximum 20 MB.
 
 Returns `201` with a single document object, shaped as above.
 
-Errors: `400` wrong file type · `413` too large.
+**A PDF with no text in it is a scan**, and Nibble reads it with a vision model
+instead — see "Reading handwriting" below. That happens inside this one request,
+so an upload of a scan takes seconds per page rather than being instant. The
+frontend shows "Reading…" on the button for exactly this reason.
+
+Errors:
+
+| Code | When |
+|---|---|
+| `400` | Wrong file type |
+| `400` | A scan, when reading handwriting is switched off |
+| `400` | A scan longer than `OCR_MAX_PAGES` |
+| `400` | Nothing readable found — a blank or unreadable photo |
+| `413` | Larger than 20 MB |
+| `503` | The reading service could not be reached, or the free daily limit is gone |
+
+Every one of those returns a `detail` written as a plain sentence for a person
+to read. The frontend shows `detail` directly, so it must never contain SQL, a
+stack trace, or a provider's own error text.
 
 ### `DELETE /documents/{id}`
 
 Deletes the document and all of its chunks. Returns `204` with no body.
 
 Errors: `404` not found.
+
+---
+
+## Reading handwriting and scans — built
+
+Not a slice of its own. It sits inside `POST /documents` and changes no shape
+here, which is the point: everything downstream still receives plain text and
+never learns where it came from.
+
+A typed PDF carries its words inside it and `pypdf` pulls them out. A scan, a
+photo, or a page of handwriting carries **no words at all** — it is a picture.
+`pypdf` returns empty strings, and without this the upload would succeed, the
+note would look completely normal, and every search would find nothing in it.
+
+So: if a PDF comes back with no text on any page, each page is drawn to a PNG
+with `pypdfium2` and sent to Groq's vision model to be transcribed. Photos skip
+the first step and go straight there. Free tier, same key as the chat model.
 
 ---
 

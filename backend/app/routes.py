@@ -21,8 +21,9 @@ from pathlib import Path, PurePosixPath
 
 from fastapi import APIRouter, HTTPException, UploadFile, status
 
+from app import config, ocr
 from app.db import get_db
-from app.files import extract_text
+from app.files import IMAGE_EXTENSIONS, extract_text, has_no_text
 
 router = APIRouter()
 
@@ -30,7 +31,7 @@ router = APIRouter()
 _MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 
 # Extensions we allow. Anything else is rejected with a 400.
-_ALLOWED_EXTENSIONS = {".pdf", ".txt", ".md"}
+_ALLOWED_EXTENSIONS = {".pdf", ".txt", ".md", *IMAGE_EXTENSIONS}
 
 # Where uploaded files are saved on disk.
 _UPLOADS_DIR = Path("uploads")
@@ -110,7 +111,10 @@ async def upload_document(file: UploadFile):
     if suffix not in _ALLOWED_EXTENSIONS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unsupported file type '{suffix}'. Upload a .pdf, .txt, or .md file.",
+            detail=(
+                f"Unsupported file type '{suffix}'. Upload a .pdf, .txt or .md file, "
+                "or a photo of your notes (.png, .jpg, .jpeg, .webp)."
+            ),
         )
 
     # --- Read the bytes and validate the size -----------------------------
@@ -121,8 +125,53 @@ async def upload_document(file: UploadFile):
             detail="File is too large. Maximum size is 20 MB.",
         )
 
-    # --- Extract text to get the page count -------------------------------
-    pages = extract_text(data, filename)
+    # --- Get the words out ------------------------------------------------
+    # Two things can go wrong here and both need a sentence rather than a
+    # traceback: the file is broken, or it is a scan and the reading service
+    # is unavailable.
+    try:
+        pages = extract_text(data, filename)
+
+        # A scanned or handwritten PDF has no text inside it, so every page
+        # comes back empty. Without this, the upload would succeed, the note
+        # would look completely normal in the list, and searching would find
+        # nothing in it — a silent failure, which is the worst kind.
+        if suffix == ".pdf" and has_no_text(pages):
+            if not config.OCR_ENABLED:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        "There's no text in that PDF — it looks like a scan or a photo. "
+                        "Reading handwriting is switched off right now, so try a PDF you "
+                        "can select text in."
+                    ),
+                )
+            if len(pages) > config.OCR_MAX_PAGES:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"That scan is {len(pages)} pages, and Nibble reads up to "
+                        f"{config.OCR_MAX_PAGES} at a time. Try splitting it up."
+                    ),
+                )
+            pages = ocr.read_pdf(data)
+
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except ocr.OcrUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Nibble couldn't read that page. {exc}",
+        ) from exc
+
+    # Even after all that, a photo of a blank page reads as nothing. Say so,
+    # rather than storing an empty note that quietly never matches anything.
+    if has_no_text(pages):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Nibble couldn't find any writing in that. Is the picture clear enough?",
+        )
+
     page_count = len(pages)
 
     # --- Save the file to disk --------------------------------------------

@@ -53,7 +53,8 @@ already closed.
 | #   | Slice                 | Milestone                 | Status                  |
 | --- | --------------------- | ------------------------- | ----------------------- |
 | 0   | The two programs talk | —                         | done, merged            |
-| 1   | Upload and list       | Slice 1 — Upload and list | in progress, 2 PRs ready |
+| 1   | Upload and list       | Slice 1 — Upload and list | built, PR open           |
+| 1.5 | Handwriting and scans | — (unplanned)             | built, PR open           |
 | 2   | Chunking              | Slice 2 — Chunking        | open                    |
 | 3   | Search, no AI yet     | Slice 3 — Search          | open                    |
 | 4   | Nibble answers        | Slice 4 — Nibble answers  | open                    |
@@ -285,18 +286,126 @@ deleted.** It is not in the contract, and removing it would be wrong today: two
 uploads with the same name share one file, so deleting it could take another
 document's file with it. Worth fixing when same-name uploads are fixed, not before.
 
-### Found while testing, and not yet an issue
+## Slice 1.5: Reading handwriting and scans
 
-**A handwritten or scanned PDF uploads successfully and contains no text at all.**
-`pypdf` reads the *text layer* of a PDF; a scan or a photo of handwriting is an
-image and has none. The upload returns 201, `page_count` is right, the note looks
-completely normal in the list, and every page is empty.
+**Built 2026-09-06.** Not on the original plan. It was added because testing
+found a failure bad enough to sink the demo, and because "upload any document"
+is what people actually expect the app to mean.
 
-That propagates: slice 2 chunks nothing, slice 3 searches nothing, and slice 4 says
-it cannot find anything in a document sitting right there on screen. **It fails
-silently, which is the worst possible shape for a demo.** OCR for handwriting is a
-different problem and not a free one — the fix here is not to support it but to say
-so out loud at upload time, when every page comes back empty.
+### The problem it fixes
+
+A handwritten or scanned PDF uploaded successfully and contained **nothing**.
+
+`pypdf` reads a PDF's *text layer* — the words stored inside the file by
+whatever typed it. A scan, a phone photo, or a page of handwriting has no text
+layer at all; it is a picture of writing. `pypdf` returns the right number of
+pages, every one an empty string:
+
+```
+pages found      : 2
+  page 1: 0 characters of text -> ''
+  page 2: 0 characters of text -> ''
+```
+
+The upload returned `201`, `page_count` was correct, and the note looked
+completely normal in the list. Slice 2 would have chunked nothing, Slice 3
+searched nothing, and Slice 4 answered "I can't find that in your notes" about
+a document sitting on screen. **It failed silently**, which is the worst
+possible shape for a live demo with an audience uploading their own files.
+
+### How it works
+
+There is no clever trick for this, and it is worth saying plainly because it
+comes up constantly: **the only way to read handwriting is to look at it.**
+That is what a vision model does, and it is exactly what happens when you paste
+a photo of your notes into Claude. Same idea, different model.
+
+1. `extract_text` runs as before.
+2. If a PDF comes back with **no text on any single page**, it is a scan.
+3. Each page is drawn to a PNG by `pypdfium2`.
+4. Each PNG goes to Groq's vision model with an instruction to transcribe and
+   nothing else.
+5. The result is plain text, so chunking, embedding, search and answers all
+   carry on without knowing any of this happened.
+
+Photos (`.png`, `.jpg`, `.jpeg`, `.webp`) skip step 2 — there is no text in a
+photo to try first — and count as a single page.
+
+### Decided
+
+**Groq's free vision model, not OCR software.** Tesseract is free and genuinely
+poor at cursive handwriting; the good handwriting engines are paid or need
+PyTorch, which
+[`adr/0001-sqlite-and-numpy.md`](./adr/0001-sqlite-and-numpy.md) already avoids.
+Groq is already the provider, already free, already keyless-at-signup, and a
+vision model reads handwriting far better than classical OCR does.
+
+**`pypdfium2` to draw the pages, not `pdf2image`.** `pdf2image` needs poppler
+installed as a separate program, and on Windows that is exactly the kind of
+afternoon this project exists to avoid — the same reasoning that removed Docker.
+`pypdfium2` is a plain `pip install` with no system dependency.
+
+**Only when there is no text at all.** A typed PDF never touches the vision
+model, so it stays instant, stays free, and cannot be made worse by a bad
+transcription. There is a test asserting the model is never called for a PDF
+that has text in it.
+
+**It runs inside the upload request, not in the background.** A job queue is a
+whole second system to explain, and the honest cost is a slow upload rather
+than a hidden one. The button says "Reading…" while it works.
+
+**Capped at `OCR_MAX_PAGES` (20).** The free tier is roughly 250 requests a day
+and each page is one request, so somebody scanning a whole textbook would burn
+the day's allowance in a single upload. Past the cap it is refused with a
+sentence suggesting the file be split.
+
+**`OCR_ENABLED` can switch it off.** If it misbehaves on demo day, one setting
+turns it off and scans get refused politely instead of failing oddly.
+
+**An empty result is refused, not stored.** If the model finds no writing, the
+upload fails with a sentence. Storing an empty note would recreate the exact
+silent failure this slice exists to remove.
+
+### Costs, accepted
+
+- **Uploads get slow for scans.** Seconds per page, in the request.
+- **~250 pages a day**, free tier, shared with Slice 4's chat calls. Fine for
+  three developers; a demo where the audience uploads their own scans could hit
+  it, so have a spare key.
+- **Quality is good, not perfect.** Neat handwriting transcribes well; messy
+  cursive will have errors, and those errors flow into search and answers.
+- **The key is now needed earlier than Slice 4.** `first-week.md` and
+  `.env.example` both say so.
+
+### Checklist
+
+- [x] `pypdfium2` added to `pyproject.toml`
+- [x] `VISION_MODEL`, `OCR_ENABLED`, `OCR_IMAGE_WIDTH`, `OCR_MAX_PAGES` in `config.py`
+- [x] `ocr.py` — page rendering, the vision call, and `OcrUnavailable`
+- [x] `has_no_text()` in `files.py`, and image files routed to the model
+- [x] The fallback and all its error sentences in `POST /documents`
+- [x] Photo uploads accepted by the file picker; the button reads "Reading…"
+- [x] `api.js` surfaces the backend's sentence instead of a status code
+- [x] 11 tests covering it, with the vision call stubbed. **44 tests pass.**
+- [x] `api.md`, `.env.example` and `first-week.md` all updated
+
+### Not verified against the real API
+
+**There is no `GROQ_API_KEY` on this machine, so the live vision call has never
+actually run.** Everything around it is tested — the scan detection, the PNG
+rendering (really producing PNGs through `pypdfium2`), the fallback, the error
+handling, the switch-off — but the request itself is stubbed in tests.
+
+The request shape follows Groq's documented vision format, and the model id
+comes from their current model list. **Someone has to put a key in `.env` and
+upload a real handwritten page before this is trusted.** Until that happens,
+treat it as written-but-unproven.
+
+### Still open
+
+**`.docx` is not supported.** "Any document" reasonably includes Word files, and
+they are not pictures — `python-docx` would read them directly with no vision
+model involved. Left out to keep this change reviewable; worth its own issue.
 
 ### Answered, 2026-09-06 — what shape the frontend scaffold takes
 

@@ -20,7 +20,16 @@ async function request(path, options) {
   const response = await fetch(`${BASE}${path}`, options)
 
   if (!response.ok) {
-    throw new Error(`The backend answered with ${response.status}`)
+    // The backend writes a plain sentence into `detail` for anything a person
+    // caused — wrong file type, a scan it cannot read, the daily limit gone.
+    // Prefer that over a status code, which tells somebody nothing.
+    let detail = null
+    try {
+      detail = (await response.json()).detail
+    } catch {
+      detail = null
+    }
+    throw new Error(detail || `The backend answered with ${response.status}`)
   }
 
   // 204 means "done, nothing to send back" — there is no JSON to read.

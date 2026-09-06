@@ -45,7 +45,7 @@ def test_extract_text_from_pdf_structure():
 def test_extract_text_unsupported_extension_raises_error():
     content = b"Some random content"
     with pytest.raises(ValueError, match="Unsupported file type"):
-        extract_text(content, "image.png")
+        extract_text(content, "virus.exe")
 
     with pytest.raises(ValueError, match="Unsupported file type"):
         extract_text(content, "archive.zip")

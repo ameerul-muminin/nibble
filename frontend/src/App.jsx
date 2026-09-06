@@ -50,7 +50,10 @@ export default function App() {
   // Three separate small states rather than one big one, because they change
   // at different times and mixing them makes it harder to see what is going on.
   const [docsStatus, setDocsStatus] = useState('loading') // loading | ready | failed
-  const [busy, setBusy] = useState(false) // true while an upload is in flight
+  // True while an upload is in flight. A typed file is instant; a scan or a
+  // photo goes to the vision model a page at a time and takes seconds, which
+  // is why the button says "Reading…" rather than nothing at all.
+  const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState(null) // a plain sentence, or null
 
   // A ref is a handle onto a real DOM element. This one lets the visible button
@@ -62,6 +65,14 @@ export default function App() {
   // check above: an empty dependency list means "run this once, not on every
   // redraw" — without it, setting state here would trigger another run and
   // the page would fetch forever.
+  //
+  // This is the one place that REPLACES the whole list rather than adjusting
+  // it, which makes it the one place that can throw away a change made while
+  // it was still in flight. Upload something before this arrives and the row
+  // would appear, then vanish when these rows landed on top of it. The upload
+  // button stays disabled until this finishes, so that window does not exist —
+  // and no row is on screen to delete yet either. Adding to a list you have
+  // not been shown is not a thing worth allowing anyway.
   useEffect(() => {
     listDocuments()
       .then((rows) => {
@@ -99,9 +110,15 @@ export default function App() {
       // only redraws when it sees a different value, and push() changes the
       // old array in place, so the note would be in the list and never show.
       setDocs((current) => [created, ...current])
-    } catch {
-      // Never show the raw error. A plain sentence, and a way to try again.
-      setNotice('That upload did not work. Check it is a PDF, TXT or MD under 20 MB, then try again.')
+    } catch (error) {
+      // The backend already writes a plain sentence for anything a person
+      // caused, and it is more useful than anything guessable here — it says
+      // whether the file was the wrong type, unreadable, or too long. Fall
+      // back to a generic line only if there was no sentence to show.
+      setNotice(
+        error.message ||
+          'That upload did not work. Check it is a PDF, TXT, MD or a photo, under 20 MB.',
+      )
     } finally {
       setBusy(false)
     }
@@ -196,7 +213,7 @@ export default function App() {
             type="file"
             ref={fileInput}
             hidden
-            accept=".pdf,.txt,.md"
+            accept=".pdf,.txt,.md,.png,.jpg,.jpeg,.webp"
             onChange={handleFileChosen}
           />
 
@@ -204,10 +221,10 @@ export default function App() {
             type="button"
             className="btn btn--primary"
             style={{ marginLeft: 'auto' }}
-            disabled={busy}
+            disabled={busy || docsStatus !== 'ready'}
             onClick={() => fileInput.current.click()}
           >
-            {busy ? 'Adding…' : 'Add a note'}
+            {busy ? 'Reading…' : 'Add a note'}
           </button>
         </div>
 

@@ -41,13 +41,63 @@ def client():
 
 
 def _make_pdf(num_pages: int = 1) -> bytes:
-    """Create a tiny in-memory PDF with the given number of blank pages."""
+    """A PDF of BLANK pages — no text layer, which is what a scan looks like."""
     writer = PdfWriter()
     for _ in range(num_pages):
         writer.add_blank_page(width=100, height=100)
     buf = BytesIO()
     writer.write(buf)
     return buf.getvalue()
+
+
+def _make_text_pdf(page_texts: list[str]) -> bytes:
+    """A minimal but genuinely valid PDF that really contains a text layer.
+
+    pypdf's PdfWriter can add blank pages but cannot put words on them, and a
+    blank page is now indistinguishable from a scan — which is the whole point
+    of has_no_text(). So these tests build a real one: a catalog, a page tree,
+    one Helvetica font, and a content stream per page that draws the text.
+    """
+    objects = []
+    n_pages = len(page_texts)
+    page_ids = [4 + i * 2 for i in range(n_pages)]
+
+    objects.append((1, b"<< /Type /Catalog /Pages 2 0 R >>"))
+    kids = b" ".join(b"%d 0 R" % pid for pid in page_ids)
+    objects.append((2, b"<< /Type /Pages /Kids [" + kids + b"] /Count %d >>" % n_pages))
+    objects.append((3, b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"))
+
+    for i, text in enumerate(page_texts):
+        pid = page_ids[i]
+        stream = b"BT /F1 12 Tf 20 100 Td (" + text.encode("ascii") + b") Tj ET"
+        objects.append(
+            (
+                pid,
+                (
+                    b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] "
+                    b"/Resources << /Font << /F1 3 0 R >> >> /Contents %d 0 R >>" % (pid + 1)
+                ),
+            )
+        )
+        objects.append(
+            (pid + 1, b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"\nendstream")
+        )
+
+    objects.sort()
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = {}
+    for num, body in objects:
+        offsets[num] = len(out)
+        out += b"%d 0 obj\n" % num + body + b"\nendobj\n"
+
+    xref_at = len(out)
+    highest = max(offsets)
+    out += b"xref\n0 %d\n" % (highest + 1)
+    out += b"0000000000 65535 f \n"
+    for num in range(1, highest + 1):
+        out += (b"%010d 00000 n \n" % offsets[num]) if num in offsets else b"0000000000 65535 f \n"
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (highest + 1, xref_at)
+    return bytes(out)
 
 
 # ---------------------------------------------------------------------------
@@ -83,8 +133,8 @@ def test_upload_md_returns_201(client):
 
 
 def test_upload_pdf_returns_201_with_correct_page_count(client):
-    """Uploading a 3-page PDF should return page_count == 3."""
-    pdf_bytes = _make_pdf(num_pages=3)
+    """Uploading a 3-page typed PDF should return page_count == 3."""
+    pdf_bytes = _make_text_pdf(["Page one text", "Page two text", "Page three text"])
     response = client.post(
         "/documents",
         files={"file": ("lecture.pdf", pdf_bytes, "application/pdf")},
@@ -95,10 +145,10 @@ def test_upload_pdf_returns_201_with_correct_page_count(client):
 
 
 def test_upload_bad_extension_returns_400(client):
-    """Uploading a .png should be rejected with 400."""
+    """An .exe is rejected. (.png is now supported — it goes to the vision model.)"""
     response = client.post(
         "/documents",
-        files={"file": ("photo.png", b"not a real png", "image/png")},
+        files={"file": ("virus.exe", b"not a real exe", "application/octet-stream")},
     )
 
     assert response.status_code == 400
