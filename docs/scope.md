@@ -247,50 +247,56 @@ become `notes.txt` and collide, which is the same known behaviour, not a new bug
 - [ ] #2 `db.py` — the SQLite connection and schema _(Alif)_
 - [ ] #3 `extract_text()` — pull the words out of a file _(Fahim, PR #24)_
 - [ ] #4 `POST /documents` and `GET /documents` _(Fahim, PR #25)_
-- [ ] #5 The notes list and an upload button _(scaffolded, behaviour open)_
-- [ ] #6 `DELETE /documents/{id}` _(scaffolded, behaviour open)_
-- [ ] #7 A delete button on each note _(scaffolded, behaviour open)_
+- [ ] #5 The notes list and an upload button _(built, PR #30)_
+- [ ] #6 `DELETE /documents/{id}` _(built, PR #30)_
+- [ ] #7 A delete button on each note _(built, PR #30)_
 
-### The scaffold, 2026-09-06
+### Built, 2026-09-06
 
-The open question below is now answered: **layout and TODOs**, option 1. What
-changed from the original plan is *who fills them in* — Alif is taking most of the
-remaining work directly rather than handing #5, #6 and #7 over, so the markers read
-`TODO(Alif)`. The three issues are still open on GitHub and should be reassigned
-there if that is the standing arrangement rather than a one-off, because right now
-the board and the code disagree about who is doing this.
+Slice 1 is complete: upload a file, see it listed, delete it. This started as a
+scaffold with the behaviour left as `TODO`, and was then finished in the same PR —
+the scaffold is gone and nothing is left marked TODO.
 
-Built, and deliberately not left as an exercise:
+**Who did it changed partway.** The plan was that the lead scaffolds and Arman and
+Fahim build. Alif took the remaining work directly instead. #5, #6 and #7 are still
+assigned to them on GitHub, so **the board and the code disagree and one of them
+should move** — that is a people question, not a code one, and it should not be left
+to drift.
 
-- [x] `DELETE /documents/{document_id}` route in `routes.py` — decorator, path
-      parameter, `204` status, docstring. The existence check and the delete are
-      `TODO`, including the cascade-versus-manual choice #6 asks to be justified.
-- [x] Four named, skipped tests for that route in `test_documents.py`. `pytest -q`
-      reports them as skipped, so what is left is visible rather than remembered.
-- [x] `listDocuments`, `uploadDocument`, `deleteDocument` shells in `api.js`, with
-      the `Content-Type` trap written out — the browser must set that header itself
-      for `multipart/form-data`, and setting it by hand gives a 422 that looks like
-      a bad file.
-- [x] The "Your notes" card in `App.jsx`: heading, upload button, hidden file input
-      wired through a `ref`, loading, failed and empty states, and the row markup
-      written out as a comment inside the `map` that still needs writing.
-- [x] The `×` button carries an `aria-label`. On its own it is read aloud as
-      "multiplication sign", which says nothing about which note it deletes.
+- [x] `DELETE /documents/{document_id}` — 204 on success, 404 for an id that is not
+      there. The existence check runs **before** the delete, because `DELETE` on a
+      missing row succeeds silently in SQL and the route would otherwise answer 204
+      for something it never deleted.
+- [x] Chunks go with the document through `ON DELETE CASCADE`, not a hand-written
+      `DELETE FROM chunks`. Chosen because it cannot be forgotten later: any future
+      route that removes a document gets it for free. The risk of that choice — a
+      dropped pragma silently doing nothing — is covered by a test in `test_db.py`
+      and another through the route itself.
+- [x] Six tests for the route, including deleting twice and a non-numeric id.
+      **32 backend tests pass, none skipped.**
+- [x] `listDocuments`, `uploadDocument` and `deleteDocument` in `api.js`.
+- [x] The notes list loads on page open, an upload appears at the top of the list
+      without a refresh, and deleting removes the row immediately.
+- [x] Every `eslint-disable` the scaffold needed is gone. `npm run lint` passes with
+      none left, which was the marker that the wiring was finished.
 
-Left open on purpose: the `useEffect` that loads the notes, the two state updates
-after upload and delete, and the `docs.map` that renders the rows.
+**The uploaded file in `uploads/` is deliberately left on disk when a document is
+deleted.** It is not in the contract, and removing it would be wrong today: two
+uploads with the same name share one file, so deleting it could take another
+document's file with it. Worth fixing when same-name uploads are fixed, not before.
 
-**A note on the `eslint-disable` lines.** `npm run lint` runs with
-`--max-warnings 0`, so a scaffold that imports things it does not use yet fails CI.
-Each unused symbol carries a targeted `// eslint-disable-next-line no-unused-vars`
-saying which TODO removes it. They are a to-do list: **when the last one is gone and
-lint still passes, the wiring is finished.** They are not a pattern to copy — a
-disable comment anywhere else needs a much better reason.
+### Found while testing, and not yet an issue
 
-**Not pulling `Button` (#18) forward.** `global.css` already has `.btn`,
-`.btn--primary` and the solid-edge press, so the scaffold uses those classes on
-plain `<button>` elements. Slice 5 wraps them into a component, which is a
-mechanical change with nothing written twice, and #18 stays a real piece of work.
+**A handwritten or scanned PDF uploads successfully and contains no text at all.**
+`pypdf` reads the *text layer* of a PDF; a scan or a photo of handwriting is an
+image and has none. The upload returns 201, `page_count` is right, the note looks
+completely normal in the list, and every page is empty.
+
+That propagates: slice 2 chunks nothing, slice 3 searches nothing, and slice 4 says
+it cannot find anything in a document sitting right there on screen. **It fails
+silently, which is the worst possible shape for a demo.** OCR for handwriting is a
+different problem and not a free one — the fix here is not to support it but to say
+so out loud at upload time, when every page comes back empty.
 
 ### Answered, 2026-09-06 — what shape the frontend scaffold takes
 

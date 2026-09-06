@@ -182,45 +182,40 @@ def delete_document(document_id: int):
     Two things about this route are new. First, `{document_id}` in the path is
     a *path parameter* — FastAPI reads it out of the URL and hands it to this
     function, already converted to an int because that is what the type hint
-    says. A request to /documents/abc gets rejected before this code runs.
+    says. A request to /documents/abc is rejected before this code runs.
 
     Second, 204 means "done, there is nothing to send back". Returning None is
     correct here; do not return a {"deleted": true} body, because the status
     code already says that and the contract promises no body.
+
+    The chunks go with the document through ON DELETE CASCADE, which db.py
+    declares on the foreign key and get_db() enables with PRAGMA foreign_keys.
+    Chosen over deleting from `chunks` by hand because it cannot be forgotten
+    later: any future route that removes a document gets the same behaviour
+    for free, whereas a hand-written DELETE has to be remembered every time.
+    The risk of that choice — a dropped pragma silently doing nothing — is
+    covered by a test in test_db.py and another through this route.
+
+    The uploaded file in uploads/ is deliberately left on disk. Deleting it is
+    not in the contract, and it would be wrong today: two uploads with the same
+    name share one file (a known, accepted limitation of slice 1), so removing
+    it here could take another document's file with it.
     """
     db = get_db()
     try:
-        # TODO(Alif): does a document with this id actually exist?
-        #   SELECT id FROM documents WHERE id = ?  and fetchone().
-        #   If it comes back None, raise HTTPException(404) with a plain
-        #   sentence — the user sees this, so no raw SQL or stack traces.
-        #   Do this BEFORE deleting: DELETE on a missing row succeeds quietly
-        #   in SQL, so without the check a 404 would come back as a 204.
+        # Check it exists FIRST. In SQL, DELETE on a row that is not there
+        # succeeds quietly and reports no error, so without this check a
+        # request for a missing id would come back 204 instead of 404.
+        row = db.execute("SELECT id FROM documents WHERE id = ?", (document_id,)).fetchone()
+        if row is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="That note isn't here. It may already have been deleted.",
+            )
 
-        # TODO(Alif): delete the row.
-        #   DELETE FROM documents WHERE id = ?  then db.commit().
-        #
-        #   The chunks have to go too. There is a real choice here, and the
-        #   PR should say which was picked and why:
-        #     (a) let ON DELETE CASCADE do it — db.py creates the foreign key
-        #         and get_db() switches PRAGMA foreign_keys = ON, so this
-        #         already works and the chunks vanish with the parent row.
-        #     (b) DELETE FROM chunks WHERE document_id = ? first, by hand.
-        #   (a) is fewer lines and cannot be forgotten later. (b) is explicit
-        #   and does not depend on a pragma somebody might drop.
-        #
-        # Until the two TODOs above are written, say so properly rather than
-        # letting a NotImplementedError become a 500 with a traceback. The
-        # project rule is that a user never sees a raw exception — a plain
-        # sentence instead. Delete this once the real behaviour is in.
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="Deleting a note isn't finished yet.",
-        )
+        db.execute("DELETE FROM documents WHERE id = ?", (document_id,))
+        db.commit()
     finally:
         db.close()
 
-    # TODO(Alif): the uploaded file itself is still sitting in uploads/.
-    #   Deleting it is not in the contract and not required to close #6.
-    #   Worth a sentence in the PR either way, so it is a decision rather
-    #   than something nobody noticed.
+    # Nothing is returned. FastAPI sends the 204 declared in the decorator.
