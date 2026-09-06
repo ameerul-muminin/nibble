@@ -248,3 +248,48 @@ def test_safe_filename_falls_back_when_nothing_usable_is_left():
     assert _safe_filename("../..") == "unnamed"
     assert _safe_filename("...") == "..."  # a real, if odd, filename
     assert _safe_filename("/") == "unnamed"
+
+
+# ---------------------------------------------------------------------------
+# DELETE /documents/{id} — issue #6
+#
+# These are the tests that route needs, named and left empty on purpose. Fill
+# in a body and delete the skip marker as each one starts passing. Running
+# `pytest -q` will list them as skipped, so the work left is visible rather
+# than remembered.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skip(reason="TODO(Alif): issue #6, the route is still a scaffold")
+def test_delete_document_returns_204(client):
+    """Deleting a document that exists returns 204 and an empty body."""
+    # TODO(Alif): upload something, delete it by the id that came back,
+    #   assert response.status_code == 204 and response.content == b"".
+
+
+@pytest.mark.skip(reason="TODO(Alif): issue #6, the route is still a scaffold")
+def test_delete_document_actually_removes_it_from_the_list(client):
+    """After deleting, GET /documents no longer includes it."""
+    # TODO(Alif): upload two, delete one, assert the other is the only one
+    #   left. This is the test that would catch a route returning 204 while
+    #   deleting nothing.
+
+
+@pytest.mark.skip(reason="TODO(Alif): issue #6, the route is still a scaffold")
+def test_delete_missing_document_returns_404(client):
+    """Deleting an id that was never there is a 404, not a quiet 204."""
+    # TODO(Alif): delete id 99999 on an empty database and assert 404.
+    #   Worth writing this one FIRST — DELETE on a missing row succeeds
+    #   silently in SQL, so this is the case that is easy to get wrong.
+
+
+@pytest.mark.skip(reason="TODO(Alif): issue #6, the route is still a scaffold")
+def test_delete_document_also_deletes_its_chunks(client):
+    """The chunks belonging to a document go with it.
+
+    test_db.py already proves the cascade works at the database level. This is
+    the same thing one layer up, through the actual HTTP route, which is where
+    a forgotten PRAGMA or a hand-written DELETE would show up.
+    """
+    # TODO(Alif): upload a document, insert a chunk against its id with
+    #   get_db(), delete through the route, then assert no chunks remain.

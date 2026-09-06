@@ -170,3 +170,57 @@ def list_documents():
         }
         for row in rows
     ]
+
+
+@router.delete("/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_document(document_id: int):
+    """Delete one document, and the chunks that belong to it.
+
+    Contract, from docs/api.md: 204 with no body on success, 404 if there is
+    no document with that id.
+
+    Two things about this route are new. First, `{document_id}` in the path is
+    a *path parameter* — FastAPI reads it out of the URL and hands it to this
+    function, already converted to an int because that is what the type hint
+    says. A request to /documents/abc gets rejected before this code runs.
+
+    Second, 204 means "done, there is nothing to send back". Returning None is
+    correct here; do not return a {"deleted": true} body, because the status
+    code already says that and the contract promises no body.
+    """
+    db = get_db()
+    try:
+        # TODO(Alif): does a document with this id actually exist?
+        #   SELECT id FROM documents WHERE id = ?  and fetchone().
+        #   If it comes back None, raise HTTPException(404) with a plain
+        #   sentence — the user sees this, so no raw SQL or stack traces.
+        #   Do this BEFORE deleting: DELETE on a missing row succeeds quietly
+        #   in SQL, so without the check a 404 would come back as a 204.
+
+        # TODO(Alif): delete the row.
+        #   DELETE FROM documents WHERE id = ?  then db.commit().
+        #
+        #   The chunks have to go too. There is a real choice here, and the
+        #   PR should say which was picked and why:
+        #     (a) let ON DELETE CASCADE do it — db.py creates the foreign key
+        #         and get_db() switches PRAGMA foreign_keys = ON, so this
+        #         already works and the chunks vanish with the parent row.
+        #     (b) DELETE FROM chunks WHERE document_id = ? first, by hand.
+        #   (a) is fewer lines and cannot be forgotten later. (b) is explicit
+        #   and does not depend on a pragma somebody might drop.
+        #
+        # Until the two TODOs above are written, say so properly rather than
+        # letting a NotImplementedError become a 500 with a traceback. The
+        # project rule is that a user never sees a raw exception — a plain
+        # sentence instead. Delete this once the real behaviour is in.
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="Deleting a note isn't finished yet.",
+        )
+    finally:
+        db.close()
+
+    # TODO(Alif): the uploaded file itself is still sitting in uploads/.
+    #   Deleting it is not in the contract and not required to close #6.
+    #   Worth a sentence in the PR either way, so it is a decision rather
+    #   than something nobody noticed.
