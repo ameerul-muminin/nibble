@@ -136,17 +136,27 @@ loudly**, which is why each got a test that fails against the old code:
       stored as `pwned.txt`, `.markdown` rejected with 400, normal upload 201.
 
 **The bit worth keeping: `Path(...).name` is not the same function on every machine.**
-The first fix used it directly. It passed every test on Windows and failed on CI,
-because `pathlib` follows the rules of whatever platform it runs on — Windows treats
-both `/` and `\` as separators, Linux treats a backslash as an ordinary character in a
-filename. So the same line strips the path on a laptop and returns the whole dangerous
-string on a server.
+The first fix used it directly. It passed on Windows and failed on CI, because
+`pathlib` follows the rules of whatever platform it runs on — Windows treats both `/`
+and `\` as separators, Linux treats a backslash as an ordinary character in a filename.
 
-The cleaning now normalises separators before taking the last piece, so the answer is
-the same everywhere. Two things this is worth remembering for:
+**Being precise about what that did and did not mean**, because the first version of
+this note overstated it. `Path(...).name` *did* stop the traversal, on both platforms:
+the dangerous shape is `../../x.txt` with forward slashes, and `.name` reduces that to
+`x.txt` everywhere. What it got wrong on Linux was the other shape — `..\..\x.txt` came
+back untouched, and the upload was then written to a file called literally
+`..\..\x.txt` **inside** `uploads/`. A daft filename, not an escape.
 
-- **Security code that only works on the machine you wrote it on is not security code.**
-  Local green meant nothing here; the Linux run was the real check.
+So this was a consistency bug rather than a second security hole: the same upload
+produced a different stored filename depending on the machine, and left a name still
+carrying separators — which is a path again the moment anything Windows-shaped reads
+it. `_safe_filename()` normalises first, so every machine stores the same clean name.
+
+Two things it is worth remembering for:
+
+- **Test what you assume is platform-independent.** `pathlib` looks like it abstracts
+  the platform away. It does the opposite — it faithfully implements whichever one it
+  is running on. Local green meant nothing here; the Linux run was the real check.
 - It is a concrete answer to "why bother with CI when it passes on my laptop", which is
   a fair thing to have been wondering.
 
@@ -186,11 +196,11 @@ Upload a PDF, see it in a list, delete it. The contract is written in
 `../../something` otherwise escapes the uploads directory.
 
 **Do not reach for `Path(filename).name` on its own.** This decision used to say
-exactly that, and it is wrong: `pathlib` follows the rules of the platform it runs on,
-so that line strips a `\` on Windows and leaves it alone on Linux. It looks correct on
-a laptop and lets the dangerous name straight through on a server. `_safe_filename()`
-normalises both separators before taking the last piece, so it answers the same
-everywhere. Corrected 2026-09-06 after CI caught it — see the review record above.
+exactly that, and it is incomplete: `pathlib` follows the rules of the platform it
+runs on, so that line strips a `\` on Windows and leaves it as part of the filename
+on Linux. `_safe_filename()` normalises both separators before taking the last piece,
+producing the same clean filename everywhere. Corrected 2026-09-06 after CI caught the
+platform-dependent result — see the review record above.
 
 This is the first place in the project where "never trust the client" stops being an
 abstraction, and it is worth understanding rather than pasting.

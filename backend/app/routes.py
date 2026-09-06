@@ -60,16 +60,24 @@ def _safe_filename(raw: str | None) -> str:
     and land on a real file. So we keep only the last piece of it and throw away
     every directory part.
 
-    The reason this replaces backslashes first, rather than just calling
+    Taking the last piece at all is what stops the traversal, and that part works
+    everywhere: "../../x.txt" becomes "x.txt" on any platform.
+
+    The reason this replaces backslashes *first*, rather than just calling
     ``Path(raw).name``, is that ``Path`` means different things on different
     machines. On Windows both / and \ separate directories, so ``Path`` strips
     both. On Linux — which is what CI and any server run — a backslash is an
     ordinary character in a filename, so ``Path("..\..\x.txt").name`` hands
-    back the whole string unchanged and the dangerous name survives. Normalising
-    first means the answer does not depend on where the code happens to run.
+    back the whole string unchanged.
 
-    Security code that only works on the machine you wrote it on is not security
-    code. CI caught exactly this, which is what CI is for.
+    On Linux that does not escape the directory: the file simply lands inside
+    uploads/ under the literal, daft name "..\..\x.txt". Worth normalising anyway,
+    for two reasons. The same upload should not produce two different stored
+    filenames depending on which machine is running. And a name still carrying
+    separators becomes a path again the moment anything Windows-shaped reads it.
+
+    CI caught this, which is what CI is for — it runs on Linux and your laptop
+    probably does not.
     """
     name = PurePosixPath((raw or "").replace("\\", "/")).name
 
