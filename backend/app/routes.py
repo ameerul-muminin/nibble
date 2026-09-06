@@ -22,6 +22,7 @@ from pathlib import Path, PurePosixPath
 from fastapi import APIRouter, HTTPException, UploadFile, status
 
 from app import config, ocr
+from app.chunking import chunk_pages
 from app.db import get_db
 from app.files import IMAGE_EXTENSIONS, extract_text, has_no_text
 
@@ -174,6 +175,27 @@ async def upload_document(file: UploadFile):
 
     page_count = len(pages)
 
+    # --- Cut it into searchable pieces ------------------------------------
+    # Before slice 2 the text stopped here: it was extracted, counted, and
+    # thrown away. A note in the list held a filename and a page count and not
+    # one searchable word — and a scan had spent vision tokens on every page to
+    # produce text that nothing kept.
+    chunks = chunk_pages(pages)
+
+    # A document with no pieces would upload cleanly, sit in the list looking
+    # perfectly normal, and never match a single search — the same silent
+    # failure that reading handwriting was built to remove, arriving a
+    # different way. It happens when a file has text but every page of it is
+    # shorter than MIN_CHUNK_CHARS: a deck of title-only slides, mostly.
+    if not chunks:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "There's too little writing in that to search. Nibble needs a few "
+                "sentences on a page, not just headings."
+            ),
+        )
+
     # --- Save the file to disk --------------------------------------------
     _UPLOADS_DIR.mkdir(exist_ok=True)
     (Path(_UPLOADS_DIR) / filename).write_bytes(data)  # filename is already cleaned above
@@ -186,8 +208,24 @@ async def upload_document(file: UploadFile):
             "INSERT INTO documents (filename, page_count, created_at) VALUES (?, ?, ?)",
             (filename, page_count, created_at),
         )
-        db.commit()
         doc_id = cursor.lastrowid
+
+        # executemany runs one statement over many rows, instead of a Python
+        # loop calling execute() a few hundred times. Same result, one trip.
+        #
+        # `embedding` is deliberately not set: the column exists from slice 1
+        # and stays NULL until slice 3 fills it in.
+        db.executemany(
+            "INSERT INTO chunks (document_id, page, content) VALUES (?, ?, ?)",
+            [(doc_id, c["page"], c["content"]) for c in chunks],
+        )
+
+        # One commit for both statements, on purpose. Committing the document
+        # first would leave a window where it exists with no pieces, and if the
+        # chunk insert then failed, that window would never close — an upload
+        # that looks finished and can never be searched. Either both land or
+        # neither does.
+        db.commit()
     finally:
         db.close()
 
@@ -271,3 +309,51 @@ def delete_document(document_id: int):
         db.close()
 
     # Nothing is returned. FastAPI sends the 204 declared in the decorator.
+
+
+# ---------------------------------------------------------------------------
+# Slice 2 — Chunking
+# ---------------------------------------------------------------------------
+
+
+@router.get("/documents/{document_id}/chunks")
+def list_chunks(document_id: int):
+    """Return the pieces one document was cut into, in reading order.
+
+    This endpoint exists mainly so chunking can be *seen*. Everything slice 2
+    does happens invisibly inside the upload, and a feature you cannot look at
+    is a feature you cannot tell is broken.
+
+    Contract, from docs/api.md: a list of {id, page, content}, or 404 if there
+    is no document with that id.
+
+    The 404 is why this asks the database two questions instead of one. Selecting
+    only from `chunks` cannot tell the difference between a document that does not
+    exist and one that exists with no pieces — both come back as an empty list —
+    and those two deserve different answers. Anything uploaded before slice 2 is
+    genuinely the second case: a real document, with nothing stored under it.
+
+    No ORDER BY, deliberately. The ids are handed out in insertion order and the
+    upload inserts in reading order, so `ORDER BY id` and "the order they were
+    written" are the same thing here. It is spelled out anyway, because relying on
+    a database to return rows in any particular order without being asked is a
+    habit that works right up until it does not.
+    """
+    db = get_db()
+    try:
+        document = db.execute("SELECT id FROM documents WHERE id = ?", (document_id,)).fetchone()
+
+        if document is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="That note isn't here. It may already have been deleted.",
+            )
+
+        rows = db.execute(
+            "SELECT id, page, content FROM chunks WHERE document_id = ? ORDER BY id",
+            (document_id,),
+        ).fetchall()
+    finally:
+        db.close()
+
+    return [{"id": row["id"], "page": row["page"], "content": row["content"]} for row in rows]

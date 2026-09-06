@@ -93,17 +93,37 @@ the first step and go straight there. Free tier, same key as the chat model.
 
 ---
 
-## Slice 2 — planned
+## Slice 2 — built
 
 ### `GET /documents/{id}/chunks`
 
-The pieces a document was cut into. Mostly so we can *see* that chunking worked.
+The pieces a document was cut into, in the order they appear in the document.
+Mostly so we can *see* that chunking worked.
 
 ```json
 [
   { "id": 1, "page": 1, "content": "Osmosis is the net movement of water..." }
 ]
 ```
+
+`page` is the real page the piece came from, and a piece never spans two pages —
+that is what keeps the number honest all the way through to a source chip in
+slice 4.
+
+Consecutive pieces from the same page **overlap**, so the tail of one is the head
+of the next. That is deliberate, not a bug in the output: a sentence cut in half
+by a piece boundary still lands whole inside at least one piece.
+
+An empty array is a real answer — it means the document exists and has no pieces.
+Anything uploaded before slice 2 is in exactly that state.
+
+Errors: `404` not found — the same sentence as `DELETE`, because an id that is
+not there is not there whichever way you ask.
+
+**Chunking also happens inside `POST /documents`.** It changes no shape above: the
+pieces are written in the same request that creates the document, and the response
+is unchanged. Before slice 2 the extracted text was thrown away the moment the page
+count had been taken from it.
 
 ---
 
