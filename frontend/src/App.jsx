@@ -85,6 +85,22 @@ export default function App() {
         if (ignore) return
         setDocs(rows)
         setDocsStatus('ready')
+
+        // If the open note is not in the list any more, close the panel.
+        // handleDelete covers the note YOU deleted; this covers the note
+        // somebody else deleted, which is reachable because every document is
+        // shared by everyone — two tabs, or two laptops on demo day. Without
+        // it the panel keeps showing a deleted note's pieces, under a heading
+        // that has quietly fallen back to the generic "Pieces" because the
+        // document it named is gone.
+        //
+        // The function form, not `rows.some((r) => r.id === selectedId)`.
+        // selectedId is not in this effect's dependency list, so the value
+        // captured here would be whatever it was when the load started — and
+        // clicking a note while the list is in flight would then close the
+        // panel that had just been opened. The updater is handed the current
+        // value instead.
+        setSelectedId((current) => (rows.some((row) => row.id === current) ? current : null))
       })
       .catch(() => {
         if (ignore) return

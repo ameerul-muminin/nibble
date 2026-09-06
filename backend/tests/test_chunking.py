@@ -166,3 +166,41 @@ def test_an_overlap_bigger_than_the_size_is_refused(monkeypatch):
 
     with pytest.raises(ValueError, match="must be smaller than"):
         chunk_pages([(1, "some text that is long enough to be chunked at all")])
+
+
+def test_whitespace_on_a_boundary_never_splits_a_word():
+    """What the overlap actually guarantees, pinned against the trimming.
+
+    Each window is stripped of leading and trailing whitespace, so the overlap
+    between two pieces is shorter than CHUNK_OVERLAP by however much whitespace
+    sat on the boundary — and where a boundary lands inside a long run of blank
+    space, the overlap disappears completely.
+
+    That is harmless, and this test is what says so rather than leaving it to be
+    rediscovered. Trimming only ever removes whitespace, so a boundary with no
+    overlap left is a boundary with nothing but blank space on it: no word is
+    being cut, so there is nothing for an overlap to rescue. The promise worth
+    testing is about words, not about a character count.
+    """
+    left = " ".join(f"alpha{n:03d}" for n in range(80))
+    right = " ".join(f"omega{n:03d}" for n in range(120))
+
+    # 200 spaces, wider than CHUNK_OVERLAP, so the overlap really does vanish.
+    chunks = chunk_pages([(1, left + " " * 200 + right)])
+    contents = [c["content"] for c in chunks]
+
+    for word in set((left + " " + right).split()):
+        assert any(word in piece for piece in contents), f"{word} was split in two"
+
+
+def test_ordinary_prose_keeps_very_nearly_the_whole_overlap():
+    """The trimming costs a character or two on real text, not the whole overlap."""
+    text = " ".join(f"word{n:04d}" for n in range(400))
+    contents = [c["content"] for c in chunk_pages([(1, text)])]
+
+    for first, second in zip(contents, contents[1:], strict=False):
+        shared = next(
+            (n for n in range(min(len(first), len(second)), 0, -1) if first.endswith(second[:n])),
+            0,
+        )
+        assert shared >= config.CHUNK_OVERLAP - 2

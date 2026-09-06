@@ -110,9 +110,18 @@ Mostly so we can *see* that chunking worked.
 that is what keeps the number honest all the way through to a source chip in
 slice 4.
 
-Consecutive pieces from the same page **overlap**, so the tail of one is the head
-of the next. That is deliberate, not a bug in the output: a sentence cut in half
-by a piece boundary still lands whole inside at least one piece.
+Consecutive pieces from the same page **overlap** — roughly `CHUNK_OVERLAP`
+characters of one reappear at the start of the next. That is deliberate, not a bug
+in the output: a sentence cut in half by a piece boundary still lands whole inside
+at least one piece.
+
+The overlap is "roughly" because each piece is trimmed of leading and trailing
+whitespace, which shortens it by whatever whitespace sat on the boundary — a
+character or two in ordinary prose. Where a boundary falls inside a long run of
+blank space the overlap can vanish entirely, and that is harmless: nothing is
+being split there, so there is nothing for an overlap to rescue. What holds
+without exception is that no word is ever cut in two without landing whole in
+some piece.
 
 An empty array is a real answer — it means the document exists and has no pieces.
 Anything uploaded before slice 2 is in exactly that state.
