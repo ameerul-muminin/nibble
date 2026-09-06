@@ -41,13 +41,63 @@ def client():
 
 
 def _make_pdf(num_pages: int = 1) -> bytes:
-    """Create a tiny in-memory PDF with the given number of blank pages."""
+    """A PDF of BLANK pages — no text layer, which is what a scan looks like."""
     writer = PdfWriter()
     for _ in range(num_pages):
         writer.add_blank_page(width=100, height=100)
     buf = BytesIO()
     writer.write(buf)
     return buf.getvalue()
+
+
+def _make_text_pdf(page_texts: list[str]) -> bytes:
+    """A minimal but genuinely valid PDF that really contains a text layer.
+
+    pypdf's PdfWriter can add blank pages but cannot put words on them, and a
+    blank page is now indistinguishable from a scan — which is the whole point
+    of has_no_text(). So these tests build a real one: a catalog, a page tree,
+    one Helvetica font, and a content stream per page that draws the text.
+    """
+    objects = []
+    n_pages = len(page_texts)
+    page_ids = [4 + i * 2 for i in range(n_pages)]
+
+    objects.append((1, b"<< /Type /Catalog /Pages 2 0 R >>"))
+    kids = b" ".join(b"%d 0 R" % pid for pid in page_ids)
+    objects.append((2, b"<< /Type /Pages /Kids [" + kids + b"] /Count %d >>" % n_pages))
+    objects.append((3, b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"))
+
+    for i, text in enumerate(page_texts):
+        pid = page_ids[i]
+        stream = b"BT /F1 12 Tf 20 100 Td (" + text.encode("ascii") + b") Tj ET"
+        objects.append(
+            (
+                pid,
+                (
+                    b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] "
+                    b"/Resources << /Font << /F1 3 0 R >> >> /Contents %d 0 R >>" % (pid + 1)
+                ),
+            )
+        )
+        objects.append(
+            (pid + 1, b"<< /Length %d >>\nstream\n" % len(stream) + stream + b"\nendstream")
+        )
+
+    objects.sort()
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = {}
+    for num, body in objects:
+        offsets[num] = len(out)
+        out += b"%d 0 obj\n" % num + body + b"\nendobj\n"
+
+    xref_at = len(out)
+    highest = max(offsets)
+    out += b"xref\n0 %d\n" % (highest + 1)
+    out += b"0000000000 65535 f \n"
+    for num in range(1, highest + 1):
+        out += (b"%010d 00000 n \n" % offsets[num]) if num in offsets else b"0000000000 65535 f \n"
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (highest + 1, xref_at)
+    return bytes(out)
 
 
 # ---------------------------------------------------------------------------
@@ -83,8 +133,8 @@ def test_upload_md_returns_201(client):
 
 
 def test_upload_pdf_returns_201_with_correct_page_count(client):
-    """Uploading a 3-page PDF should return page_count == 3."""
-    pdf_bytes = _make_pdf(num_pages=3)
+    """Uploading a 3-page typed PDF should return page_count == 3."""
+    pdf_bytes = _make_text_pdf(["Page one text", "Page two text", "Page three text"])
     response = client.post(
         "/documents",
         files={"file": ("lecture.pdf", pdf_bytes, "application/pdf")},
@@ -95,10 +145,10 @@ def test_upload_pdf_returns_201_with_correct_page_count(client):
 
 
 def test_upload_bad_extension_returns_400(client):
-    """Uploading a .png should be rejected with 400."""
+    """An .exe is rejected. (.png is now supported — it goes to the vision model.)"""
     response = client.post(
         "/documents",
-        files={"file": ("photo.png", b"not a real png", "image/png")},
+        files={"file": ("virus.exe", b"not a real exe", "application/octet-stream")},
     )
 
     assert response.status_code == 400
@@ -252,44 +302,117 @@ def test_safe_filename_falls_back_when_nothing_usable_is_left():
 
 # ---------------------------------------------------------------------------
 # DELETE /documents/{id} — issue #6
-#
-# These are the tests that route needs, named and left empty on purpose. Fill
-# in a body and delete the skip marker as each one starts passing. Running
-# `pytest -q` will list them as skipped, so the work left is visible rather
-# than remembered.
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skip(reason="TODO(Alif): issue #6, the route is still a scaffold")
 def test_delete_document_returns_204(client):
     """Deleting a document that exists returns 204 and an empty body."""
-    # TODO(Alif): upload something, delete it by the id that came back,
-    #   assert response.status_code == 204 and response.content == b"".
+    created = client.post(
+        "/documents",
+        files={"file": ("notes.txt", b"Delete me.", "text/plain")},
+    ).json()
+
+    response = client.delete(f"/documents/{created['id']}")
+
+    assert response.status_code == 204
+    assert response.content == b""
 
 
-@pytest.mark.skip(reason="TODO(Alif): issue #6, the route is still a scaffold")
 def test_delete_document_actually_removes_it_from_the_list(client):
-    """After deleting, GET /documents no longer includes it."""
-    # TODO(Alif): upload two, delete one, assert the other is the only one
-    #   left. This is the test that would catch a route returning 204 while
-    #   deleting nothing.
+    """After deleting, GET /documents no longer includes it.
+
+    This is the test that catches a route returning 204 while deleting nothing.
+    """
+    keep = client.post("/documents", files={"file": ("keep.txt", b"Keep me.", "text/plain")}).json()
+    remove = client.post(
+        "/documents", files={"file": ("remove.txt", b"Not me.", "text/plain")}
+    ).json()
+
+    client.delete(f"/documents/{remove['id']}")
+
+    docs = client.get("/documents").json()
+    assert [d["id"] for d in docs] == [keep["id"]]
 
 
-@pytest.mark.skip(reason="TODO(Alif): issue #6, the route is still a scaffold")
 def test_delete_missing_document_returns_404(client):
-    """Deleting an id that was never there is a 404, not a quiet 204."""
-    # TODO(Alif): delete id 99999 on an empty database and assert 404.
-    #   Worth writing this one FIRST — DELETE on a missing row succeeds
-    #   silently in SQL, so this is the case that is easy to get wrong.
+    """Deleting an id that was never there is a 404, not a quiet 204.
+
+    Worth writing first: DELETE on a missing row succeeds silently in SQL, so
+    without an existence check this comes back 204 and looks like it worked.
+    """
+    response = client.delete("/documents/99999")
+
+    assert response.status_code == 404
+    # A plain sentence, not SQL and not a stack trace.
+    assert "isn't here" in response.json()["detail"]
 
 
-@pytest.mark.skip(reason="TODO(Alif): issue #6, the route is still a scaffold")
+def test_delete_document_twice_is_a_404_the_second_time(client):
+    """The same delete repeated stops being a success."""
+    created = client.post("/documents", files={"file": ("once.txt", b"Once.", "text/plain")}).json()
+
+    assert client.delete(f"/documents/{created['id']}").status_code == 204
+    assert client.delete(f"/documents/{created['id']}").status_code == 404
+
+
 def test_delete_document_also_deletes_its_chunks(client):
     """The chunks belonging to a document go with it.
 
-    test_db.py already proves the cascade works at the database level. This is
-    the same thing one layer up, through the actual HTTP route, which is where
-    a forgotten PRAGMA or a hand-written DELETE would show up.
+    test_db.py proves the cascade at the database level. This is the same thing
+    through the real HTTP route, which is where a dropped PRAGMA would show up.
     """
-    # TODO(Alif): upload a document, insert a chunk against its id with
-    #   get_db(), delete through the route, then assert no chunks remain.
+    from app.db import get_db
+
+    created = client.post(
+        "/documents", files={"file": ("biology.txt", b"Osmosis.", "text/plain")}
+    ).json()
+
+    db = get_db()
+    try:
+        db.execute(
+            "INSERT INTO chunks (document_id, page, content) VALUES (?, ?, ?)",
+            (created["id"], 1, "Osmosis is the net movement of water."),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    client.delete(f"/documents/{created['id']}")
+
+    db = get_db()
+    try:
+        remaining = db.execute(
+            "SELECT COUNT(*) AS n FROM chunks WHERE document_id = ?", (created["id"],)
+        ).fetchone()["n"]
+    finally:
+        db.close()
+
+    assert remaining == 0
+
+
+def test_delete_with_a_non_numeric_id_is_rejected(client):
+    """FastAPI converts the path parameter, so /documents/abc never reaches us."""
+    assert client.delete("/documents/abc").status_code == 422
+
+
+def test_two_concurrent_deletes_give_one_204_and_one_404(client):
+    """Exactly one caller wins when the same note is deleted twice at once.
+
+    The obvious way to write this route is SELECT to check it exists, then
+    DELETE. Both requests would pass that check, both would call DELETE, and
+    the loser would remove nothing while still answering 204 — reporting a
+    success for something it did not do. Asking the DELETE how many rows it
+    removed closes the gap, because it is a single statement.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    created = client.post(
+        "/documents", files={"file": ("race.txt", b"Delete me once.", "text/plain")}
+    ).json()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        both = [pool.submit(client.delete, f"/documents/{created['id']}") for _ in range(2)]
+        codes = sorted(f.result().status_code for f in both)
+
+    assert codes == [204, 404]
+    assert client.get("/documents").json() == []

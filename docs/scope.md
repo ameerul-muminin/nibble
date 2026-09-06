@@ -53,7 +53,8 @@ already closed.
 | #   | Slice                 | Milestone                 | Status                  |
 | --- | --------------------- | ------------------------- | ----------------------- |
 | 0   | The two programs talk | —                         | done, merged            |
-| 1   | Upload and list       | Slice 1 — Upload and list | in progress, 2 PRs ready |
+| 1   | Upload and list       | Slice 1 — Upload and list | built, PR open           |
+| 1.5 | Handwriting and scans | — (unplanned)             | built, PR open           |
 | 2   | Chunking              | Slice 2 — Chunking        | open                    |
 | 3   | Search, no AI yet     | Slice 3 — Search          | open                    |
 | 4   | Nibble answers        | Slice 4 — Nibble answers  | open                    |
@@ -247,50 +248,201 @@ become `notes.txt` and collide, which is the same known behaviour, not a new bug
 - [ ] #2 `db.py` — the SQLite connection and schema _(Alif)_
 - [ ] #3 `extract_text()` — pull the words out of a file _(Fahim, PR #24)_
 - [ ] #4 `POST /documents` and `GET /documents` _(Fahim, PR #25)_
-- [ ] #5 The notes list and an upload button _(scaffolded, behaviour open)_
-- [ ] #6 `DELETE /documents/{id}` _(scaffolded, behaviour open)_
-- [ ] #7 A delete button on each note _(scaffolded, behaviour open)_
+- [ ] #5 The notes list and an upload button _(built, PR #30)_
+- [ ] #6 `DELETE /documents/{id}` _(built, PR #30)_
+- [ ] #7 A delete button on each note _(built, PR #30)_
 
-### The scaffold, 2026-09-06
+### Built, 2026-09-06
 
-The open question below is now answered: **layout and TODOs**, option 1. What
-changed from the original plan is *who fills them in* — Alif is taking most of the
-remaining work directly rather than handing #5, #6 and #7 over, so the markers read
-`TODO(Alif)`. The three issues are still open on GitHub and should be reassigned
-there if that is the standing arrangement rather than a one-off, because right now
-the board and the code disagree about who is doing this.
+Slice 1 is complete: upload a file, see it listed, delete it. This started as a
+scaffold with the behaviour left as `TODO`, and was then finished in the same PR —
+the scaffold is gone and nothing is left marked TODO.
 
-Built, and deliberately not left as an exercise:
+**Who did it changed partway.** The plan was that the lead scaffolds and Arman and
+Fahim build. Alif took the remaining work directly instead. #5, #6 and #7 are still
+assigned to them on GitHub, so **the board and the code disagree and one of them
+should move** — that is a people question, not a code one, and it should not be left
+to drift.
 
-- [x] `DELETE /documents/{document_id}` route in `routes.py` — decorator, path
-      parameter, `204` status, docstring. The existence check and the delete are
-      `TODO`, including the cascade-versus-manual choice #6 asks to be justified.
-- [x] Four named, skipped tests for that route in `test_documents.py`. `pytest -q`
-      reports them as skipped, so what is left is visible rather than remembered.
-- [x] `listDocuments`, `uploadDocument`, `deleteDocument` shells in `api.js`, with
-      the `Content-Type` trap written out — the browser must set that header itself
-      for `multipart/form-data`, and setting it by hand gives a 422 that looks like
-      a bad file.
-- [x] The "Your notes" card in `App.jsx`: heading, upload button, hidden file input
-      wired through a `ref`, loading, failed and empty states, and the row markup
-      written out as a comment inside the `map` that still needs writing.
-- [x] The `×` button carries an `aria-label`. On its own it is read aloud as
-      "multiplication sign", which says nothing about which note it deletes.
+- [x] `DELETE /documents/{document_id}` — 204 on success, 404 for an id that is not
+      there. The existence check runs **before** the delete, because `DELETE` on a
+      missing row succeeds silently in SQL and the route would otherwise answer 204
+      for something it never deleted.
+- [x] Chunks go with the document through `ON DELETE CASCADE`, not a hand-written
+      `DELETE FROM chunks`. Chosen because it cannot be forgotten later: any future
+      route that removes a document gets it for free. The risk of that choice — a
+      dropped pragma silently doing nothing — is covered by a test in `test_db.py`
+      and another through the route itself.
+- [x] Six tests for the route, including deleting twice and a non-numeric id.
+      **32 backend tests pass, none skipped.**
+- [x] `listDocuments`, `uploadDocument` and `deleteDocument` in `api.js`.
+- [x] The notes list loads on page open, an upload appears at the top of the list
+      without a refresh, and deleting removes the row immediately.
+- [x] Every `eslint-disable` the scaffold needed is gone. `npm run lint` passes with
+      none left, which was the marker that the wiring was finished.
 
-Left open on purpose: the `useEffect` that loads the notes, the two state updates
-after upload and delete, and the `docs.map` that renders the rows.
+**The uploaded file in `uploads/` is deliberately left on disk when a document is
+deleted.** It is not in the contract, and removing it would be wrong today: two
+uploads with the same name share one file, so deleting it could take another
+document's file with it. Worth fixing when same-name uploads are fixed, not before.
 
-**A note on the `eslint-disable` lines.** `npm run lint` runs with
-`--max-warnings 0`, so a scaffold that imports things it does not use yet fails CI.
-Each unused symbol carries a targeted `// eslint-disable-next-line no-unused-vars`
-saying which TODO removes it. They are a to-do list: **when the last one is gone and
-lint still passes, the wiring is finished.** They are not a pattern to copy — a
-disable comment anywhere else needs a much better reason.
+## Slice 1.5: Reading handwriting and scans
 
-**Not pulling `Button` (#18) forward.** `global.css` already has `.btn`,
-`.btn--primary` and the solid-edge press, so the scaffold uses those classes on
-plain `<button>` elements. Slice 5 wraps them into a component, which is a
-mechanical change with nothing written twice, and #18 stays a real piece of work.
+**Built 2026-09-06.** Not on the original plan. It was added because testing
+found a failure bad enough to sink the demo, and because "upload any document"
+is what people actually expect the app to mean.
+
+### The problem it fixes
+
+A handwritten or scanned PDF uploaded successfully and contained **nothing**.
+
+`pypdf` reads a PDF's *text layer* — the words stored inside the file by
+whatever typed it. A scan, a phone photo, or a page of handwriting has no text
+layer at all; it is a picture of writing. `pypdf` returns the right number of
+pages, every one an empty string:
+
+```
+pages found      : 2
+  page 1: 0 characters of text -> ''
+  page 2: 0 characters of text -> ''
+```
+
+The upload returned `201`, `page_count` was correct, and the note looked
+completely normal in the list. Slice 2 would have chunked nothing, Slice 3
+searched nothing, and Slice 4 answered "I can't find that in your notes" about
+a document sitting on screen. **It failed silently**, which is the worst
+possible shape for a live demo with an audience uploading their own files.
+
+### How it works
+
+There is no clever trick for this, and it is worth saying plainly because it
+comes up constantly: **the only way to read handwriting is to look at it.**
+That is what a vision model does, and it is exactly what happens when you paste
+a photo of your notes into Claude. Same idea, different model.
+
+1. `extract_text` runs as before.
+2. If a PDF comes back with **no text on any single page**, it is a scan.
+3. Each page is drawn to a PNG by `pypdfium2`.
+4. Each PNG goes to Groq's vision model with an instruction to transcribe and
+   nothing else.
+5. The result is plain text, so chunking, embedding, search and answers all
+   carry on without knowing any of this happened.
+
+Photos (`.png`, `.jpg`, `.jpeg`, `.webp`) skip step 2 — there is no text in a
+photo to try first — and count as a single page.
+
+### Decided
+
+**Groq's free vision model, not OCR software.** Tesseract is free and genuinely
+poor at cursive handwriting; the good handwriting engines are paid or need
+PyTorch, which
+[`adr/0001-sqlite-and-numpy.md`](./adr/0001-sqlite-and-numpy.md) already avoids.
+Groq is already the provider, already free, already keyless-at-signup, and a
+vision model reads handwriting far better than classical OCR does.
+
+**`pypdfium2` to draw the pages, not `pdf2image`.** `pdf2image` needs poppler
+installed as a separate program, and on Windows that is exactly the kind of
+afternoon this project exists to avoid — the same reasoning that removed Docker.
+`pypdfium2` is a plain `pip install` with no system dependency.
+
+**Only when there is no text at all.** A typed PDF never touches the vision
+model, so it stays instant, stays free, and cannot be made worse by a bad
+transcription. There is a test asserting the model is never called for a PDF
+that has text in it.
+
+**It runs inside the upload request, not in the background.** A job queue is a
+whole second system to explain, and the honest cost is a slow upload rather
+than a hidden one. The button says "Reading…" while it works.
+
+**Capped at `OCR_MAX_PAGES` (5).** Not for the reason first assumed. The daily
+request count is generous; the binding limit is 1000 output tokens *per minute*,
+reserved against `max_tokens`, which works out at about two pages a minute. Five
+pages is a two-and-a-half minute upload and twenty would look like a hang. Past
+the cap it is refused with a sentence suggesting the file be split.
+
+**`reasoning_effort: "none"`, and a stripper for `<think>` blocks.** This model
+reasons out loud by default. That reasoning would otherwise be stored as though
+it were the words on the page — chunked, embedded, and quoted back to a student
+as their own notes.
+
+**A rate-limited page waits and retries.** Running out of per-minute allowance
+partway through a scan is the ordinary case, not a failure, so it should not
+kill an upload that was already half done.
+
+**`OCR_ENABLED` can switch it off.** If it misbehaves on demo day, one setting
+turns it off and scans get refused politely instead of failing oddly.
+
+**An empty result is refused, not stored.** If the model finds no writing, the
+upload fails with a sentence. Storing an empty note would recreate the exact
+silent failure this slice exists to remove.
+
+### Costs, accepted
+
+- **Uploads get slow for scans.** Seconds per page, in the request.
+- **About two pages a minute**, which is the limit that actually bites — 1000
+  output tokens per minute, reserved against `max_tokens`. The daily request
+  count is generous by comparison. A five-page scan is a two-and-a-half minute
+  upload, and it is shared with Slice 4's chat calls, so have a spare key for
+  demo day.
+- **Quality is good, not perfect.** Neat handwriting transcribes well; messy
+  cursive will have errors, and those errors flow into search and answers.
+- **The key is now needed earlier than Slice 4.** `first-week.md` and
+  `.env.example` both say so.
+
+### Checklist
+
+- [x] `pypdfium2` added to `pyproject.toml`
+- [x] `VISION_MODEL`, `OCR_ENABLED`, `OCR_IMAGE_WIDTH`, `OCR_MAX_PAGES` in `config.py`
+- [x] `ocr.py` — page rendering, the vision call, and `OcrUnavailable`
+- [x] `has_no_text()` in `files.py`, and image files routed to the model
+- [x] The fallback and all its error sentences in `POST /documents`
+- [x] Photo uploads accepted by the file picker; the button reads "Reading…"
+- [x] `api.js` surfaces the backend's sentence instead of a status code
+- [x] 15 tests covering it, with the vision call stubbed. **48 tests pass.**
+- [x] `api.md`, `.env.example` and `first-week.md` all updated
+
+### Verified against the real API, and what that changed
+
+**It works.** A three-page image-only PDF was uploaded through the real route
+with a real key: detected as a scan, every page read, `201` in 24 seconds.
+
+Three things only showed up by actually running it, and none would have been
+found by reading the code:
+
+**1. `max_tokens` is required, not optional.** Without it the first call failed
+with a 429 before reading anything. Groq reserves against the *expected* output,
+which with no limit set is the model's maximum — 1192 tokens against a cap of
+1000. Nothing had been read, nothing had been spent, and the error said "rate
+limit" while the account had its full allowance untouched.
+
+**2. This model thinks out loud.** The first successful call returned 400 words
+of `<think>` reasoning — *"Wait, looking closer at the bottom part…"* — before
+the answer. Stored as-is, that reasoning would have been chunked, embedded and
+eventually quoted back to a student as their own notes. Fixed with
+`reasoning_effort: "none"`, plus a stripper for the block in case it ever
+appears anyway, because the failure is silent and the cost is high.
+
+**3. The real throughput is about two pages a minute.** The 1000-token cap is
+per minute and is reserved against `max_tokens`, so the page budget is far
+tighter than the daily request count suggests. Hitting it mid-scan is the
+normal path, not an error, so a rate-limited page now waits and tries again
+rather than failing an upload that was halfway done.
+
+That last one is why **`OCR_MAX_PAGES` is 5, not 20.** Five pages is already a
+two-and-a-half minute upload; twenty would look like the app had hung. The
+original 20 was a guess made from the daily request limit, and it was wrong.
+
+**Still not verified: quality on real handwriting.** Everything above was tested
+with rendered type, which is easier to read than a person's writing. Neat
+handwriting should be fine and messy cursive will have errors — but nobody has
+put an actual handwritten page through it yet, and until someone does, the
+quality claim is an expectation rather than a result.
+
+### Still open
+
+**`.docx` is not supported.** "Any document" reasonably includes Word files, and
+they are not pictures — `python-docx` would read them directly with no vision
+model involved. Left out to keep this change reviewable; worth its own issue.
 
 ### Answered, 2026-09-06 — what shape the frontend scaffold takes
 

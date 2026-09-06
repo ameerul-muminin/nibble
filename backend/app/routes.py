@@ -21,8 +21,9 @@ from pathlib import Path, PurePosixPath
 
 from fastapi import APIRouter, HTTPException, UploadFile, status
 
+from app import config, ocr
 from app.db import get_db
-from app.files import extract_text
+from app.files import IMAGE_EXTENSIONS, extract_text, has_no_text
 
 router = APIRouter()
 
@@ -30,7 +31,7 @@ router = APIRouter()
 _MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 
 # Extensions we allow. Anything else is rejected with a 400.
-_ALLOWED_EXTENSIONS = {".pdf", ".txt", ".md"}
+_ALLOWED_EXTENSIONS = {".pdf", ".txt", ".md", *IMAGE_EXTENSIONS}
 
 # Where uploaded files are saved on disk.
 _UPLOADS_DIR = Path("uploads")
@@ -110,7 +111,10 @@ async def upload_document(file: UploadFile):
     if suffix not in _ALLOWED_EXTENSIONS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unsupported file type '{suffix}'. Upload a .pdf, .txt, or .md file.",
+            detail=(
+                f"Unsupported file type '{suffix}'. Upload a .pdf, .txt or .md file, "
+                "or a photo of your notes (.png, .jpg, .jpeg, .webp)."
+            ),
         )
 
     # --- Read the bytes and validate the size -----------------------------
@@ -121,8 +125,53 @@ async def upload_document(file: UploadFile):
             detail="File is too large. Maximum size is 20 MB.",
         )
 
-    # --- Extract text to get the page count -------------------------------
-    pages = extract_text(data, filename)
+    # --- Get the words out ------------------------------------------------
+    # Two things can go wrong here and both need a sentence rather than a
+    # traceback: the file is broken, or it is a scan and the reading service
+    # is unavailable.
+    try:
+        pages = extract_text(data, filename)
+
+        # A scanned or handwritten PDF has no text inside it, so every page
+        # comes back empty. Without this, the upload would succeed, the note
+        # would look completely normal in the list, and searching would find
+        # nothing in it — a silent failure, which is the worst kind.
+        if suffix == ".pdf" and has_no_text(pages):
+            if not config.OCR_ENABLED:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        "There's no text in that PDF — it looks like a scan or a photo. "
+                        "Reading handwriting is switched off right now, so try a PDF you "
+                        "can select text in."
+                    ),
+                )
+            if len(pages) > config.OCR_MAX_PAGES:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"That scan is {len(pages)} pages, and Nibble reads up to "
+                        f"{config.OCR_MAX_PAGES} at a time. Try splitting it up."
+                    ),
+                )
+            pages = ocr.read_pdf(data)
+
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except ocr.OcrUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Nibble couldn't read that page. {exc}",
+        ) from exc
+
+    # Even after all that, a photo of a blank page reads as nothing. Say so,
+    # rather than storing an empty note that quietly never matches anything.
+    if has_no_text(pages):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Nibble couldn't find any writing in that. Is the picture clear enough?",
+        )
+
     page_count = len(pages)
 
     # --- Save the file to disk --------------------------------------------
@@ -182,45 +231,43 @@ def delete_document(document_id: int):
     Two things about this route are new. First, `{document_id}` in the path is
     a *path parameter* — FastAPI reads it out of the URL and hands it to this
     function, already converted to an int because that is what the type hint
-    says. A request to /documents/abc gets rejected before this code runs.
+    says. A request to /documents/abc is rejected before this code runs.
 
     Second, 204 means "done, there is nothing to send back". Returning None is
     correct here; do not return a {"deleted": true} body, because the status
     code already says that and the contract promises no body.
+
+    The chunks go with the document through ON DELETE CASCADE, which db.py
+    declares on the foreign key and get_db() enables with PRAGMA foreign_keys.
+    Chosen over deleting from `chunks` by hand because it cannot be forgotten
+    later: any future route that removes a document gets the same behaviour
+    for free, whereas a hand-written DELETE has to be remembered every time.
+    The risk of that choice — a dropped pragma silently doing nothing — is
+    covered by a test in test_db.py and another through this route.
+
+    The uploaded file in uploads/ is deliberately left on disk. Deleting it is
+    not in the contract, and it would be wrong today: two uploads with the same
+    name share one file (a known, accepted limitation of slice 1), so removing
+    it here could take another document's file with it.
     """
     db = get_db()
     try:
-        # TODO(Alif): does a document with this id actually exist?
-        #   SELECT id FROM documents WHERE id = ?  and fetchone().
-        #   If it comes back None, raise HTTPException(404) with a plain
-        #   sentence — the user sees this, so no raw SQL or stack traces.
-        #   Do this BEFORE deleting: DELETE on a missing row succeeds quietly
-        #   in SQL, so without the check a 404 would come back as a 204.
+        # Delete first, then ask how many rows that actually removed. In SQL a
+        # DELETE against a row that is not there succeeds quietly and reports
+        # no error, so something has to distinguish the two cases — but it must
+        # not be a separate SELECT beforehand. Two requests deleting the same id
+        # would both pass that check, and the loser would delete nothing and
+        # still answer 204. Asking the DELETE itself is one statement, so there
+        # is no gap in between for anything to change.
+        cursor = db.execute("DELETE FROM documents WHERE id = ?", (document_id,))
+        db.commit()
 
-        # TODO(Alif): delete the row.
-        #   DELETE FROM documents WHERE id = ?  then db.commit().
-        #
-        #   The chunks have to go too. There is a real choice here, and the
-        #   PR should say which was picked and why:
-        #     (a) let ON DELETE CASCADE do it — db.py creates the foreign key
-        #         and get_db() switches PRAGMA foreign_keys = ON, so this
-        #         already works and the chunks vanish with the parent row.
-        #     (b) DELETE FROM chunks WHERE document_id = ? first, by hand.
-        #   (a) is fewer lines and cannot be forgotten later. (b) is explicit
-        #   and does not depend on a pragma somebody might drop.
-        #
-        # Until the two TODOs above are written, say so properly rather than
-        # letting a NotImplementedError become a 500 with a traceback. The
-        # project rule is that a user never sees a raw exception — a plain
-        # sentence instead. Delete this once the real behaviour is in.
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="Deleting a note isn't finished yet.",
-        )
+        if cursor.rowcount == 0:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="That note isn't here. It may already have been deleted.",
+            )
     finally:
         db.close()
 
-    # TODO(Alif): the uploaded file itself is still sitting in uploads/.
-    #   Deleting it is not in the contract and not required to close #6.
-    #   Worth a sentence in the PR either way, so it is a decision rather
-    #   than something nobody noticed.
+    # Nothing is returned. FastAPI sends the 204 declared in the decorator.

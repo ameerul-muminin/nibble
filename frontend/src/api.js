@@ -20,7 +20,16 @@ async function request(path, options) {
   const response = await fetch(`${BASE}${path}`, options)
 
   if (!response.ok) {
-    throw new Error(`The backend answered with ${response.status}`)
+    // The backend writes a plain sentence into `detail` for anything a person
+    // caused — wrong file type, a scan it cannot read, the daily limit gone.
+    // Prefer that over a status code, which tells somebody nothing.
+    let detail = null
+    try {
+      detail = (await response.json()).detail
+    } catch {
+      detail = null
+    }
+    throw new Error(detail || `The backend answered with ${response.status}`)
   }
 
   // 204 means "done, nothing to send back" — there is no JSON to read.
@@ -40,9 +49,7 @@ export function getHealth() {
  * this file and routes.py be built without waiting for each other.
  */
 export function listDocuments() {
-  // TODO(Alif): one line. request('/documents') already does the fetch, the
-  //   error handling and the JSON parsing, so this is just returning it.
-  throw new Error('TODO(Alif): listDocuments is not written yet')
+  return request('/documents')
 }
 
 /**
@@ -50,19 +57,19 @@ export function listDocuments() {
  *
  * @param {File} file - straight from an <input type="file"> element.
  */
-// eslint-disable-next-line no-unused-vars -- delete this line once `file` is used
 export function uploadDocument(file) {
-  // TODO(Alif): build a FormData, append the file under the name 'file'
-  //   (that name has to match the parameter in routes.py), then:
-  //     return request('/documents', { method: 'POST', body: form })
-  //
-  // DO NOT set a Content-Type header. It is tempting, because every other
-  // POST you will ever write sets one. The browser has to set this one
-  // itself, because multipart/form-data needs a boundary string that only
-  // the browser knows. Setting it by hand sends a boundary-less header, the
+  // FormData is how a file gets sent over HTTP. The name 'file' has to match
+  // the parameter name in routes.py — that is how FastAPI finds it.
+  const form = new FormData()
+  form.append('file', file)
+
+  // No Content-Type header here, on purpose. It is tempting, because every
+  // other POST you will ever write sets one. The browser has to set this one
+  // itself, because multipart/form-data needs a boundary string that only the
+  // browser knows. Setting it by hand sends a boundary-less header, the
   // backend cannot split the body, and you get a confusing 422 that looks
   // like the file is wrong when the file is fine.
-  throw new Error('TODO(Alif): uploadDocument is not written yet')
+  return request('/documents', { method: 'POST', body: form })
 }
 
 /**
@@ -71,8 +78,6 @@ export function uploadDocument(file) {
  * The backend answers 204 with no body, and `request` already turns that into
  * null rather than trying to parse JSON that is not there.
  */
-// eslint-disable-next-line no-unused-vars -- delete this line once `id` is used
 export function deleteDocument(id) {
-  // TODO(Alif): return request(`/documents/${id}`, { method: 'DELETE' })
-  throw new Error('TODO(Alif): deleteDocument is not written yet')
+  return request(`/documents/${id}`, { method: 'DELETE' })
 }

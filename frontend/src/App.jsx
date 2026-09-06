@@ -11,11 +11,6 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { Show, SignInButton, SignUpButton, UserButton } from '@clerk/react'
-// The three Slice 1 functions are imported ready for the TODOs below. Each
-// eslint-disable in this file marks something the scaffold set up but has not
-// used yet — when a TODO is finished, delete the matching disable with it. If
-// `npm run lint` passes with none of them left, the wiring is complete.
-// eslint-disable-next-line no-unused-vars -- delete once the TODOs below use these
 import { deleteDocument, getHealth, listDocuments, uploadDocument } from './api'
 import { Mascot } from './components/Mascot'
 import './styles/global.css'
@@ -50,14 +45,15 @@ export default function App() {
 
   // The list of notes. It starts as an empty array rather than null, so the
   // rendering code below can always call .map on it without checking first.
-  // eslint-disable-next-line no-unused-vars -- delete once setDocs is called
   const [docs, setDocs] = useState([])
 
   // Three separate small states rather than one big one, because they change
   // at different times and mixing them makes it harder to see what is going on.
-  // eslint-disable-next-line no-unused-vars -- delete once setDocsStatus is called
   const [docsStatus, setDocsStatus] = useState('loading') // loading | ready | failed
-  const [busy, setBusy] = useState(false) // true while an upload is in flight
+  // True while an upload is in flight. A typed file is instant; a scan or a
+  // photo goes to the vision model a page at a time and takes seconds, which
+  // is why the button says "Reading…" rather than nothing at all.
+  const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState(null) // a plain sentence, or null
 
   // A ref is a handle onto a real DOM element. This one lets the visible button
@@ -65,12 +61,40 @@ export default function App() {
   // fiddly bit, and it is the same three lines in every React app.
   const fileInput = useRef(null)
 
-  // TODO(Alif): #5 — load the notes once, when the page appears.
-  //   Another useEffect with an empty dependency list, same shape as the
-  //   health one above:
-  //     listDocuments()
-  //       .then((rows) => { setDocs(rows); setDocsStatus('ready') })
-  //       .catch(() => setDocsStatus('failed'))
+  // Bumping this re-runs the load below. It is how the "Try again" button on
+  // the failed state works: change the value, the effect runs again.
+  const [reloadKey, setReloadKey] = useState(0)
+
+  // Load the notes. This is the one place that REPLACES the whole list rather
+  // than adjusting it, which makes it the one place that can throw away a
+  // change made while it was still in flight.
+  //
+  // `ignore` is the guard against that. When this effect is torn down — or run
+  // again — the old request is still out there and will still resolve, and
+  // without the flag its rows would land on top of whatever happened since.
+  // React's StrictMode runs every effect twice in development on purpose, to
+  // make exactly this bug show up on a laptop rather than in front of an
+  // audience. The cleanup function marks the old run as stale, so only the
+  // newest one is allowed to write anything.
+  useEffect(() => {
+    let ignore = false
+    setDocsStatus('loading')
+
+    listDocuments()
+      .then((rows) => {
+        if (ignore) return
+        setDocs(rows)
+        setDocsStatus('ready')
+      })
+      .catch(() => {
+        if (ignore) return
+        setDocsStatus('failed')
+      })
+
+    return () => {
+      ignore = true
+    }
+  }, [reloadKey])
 
   /** #5 — runs when a file has been chosen in the hidden input. */
   async function handleFileChosen(event) {
@@ -85,36 +109,48 @@ export default function App() {
     setBusy(true)
     setNotice(null)
     try {
-      // TODO(Alif): #5 — await uploadDocument(file), then put the new
-      //   document at the FRONT of the list, because the backend returns
-      //   newest first and the screen should agree with it:
-      //     const created = await uploadDocument(file)
-      //     setDocs([created, ...docs])
+      const created = await uploadDocument(file)
+
+      // The new note goes at the FRONT, because the backend returns newest
+      // first and the screen should agree with it.
       //
-      //   Note it builds a NEW array rather than calling docs.push(). React
-      //   only redraws when it sees a different value, and push() changes the
-      //   old array in place, so the screen would not update.
-      throw new Error('TODO(Alif): the upload is not wired up yet')
-    } catch {
-      // Never show the raw error. A plain sentence, and a way to try again.
-      setNotice('That upload did not work. Check it is a PDF, TXT or MD under 20 MB, then try again.')
+      // setDocs is given a FUNCTION rather than a value. Written as
+      // setDocs([created, ...docs]), `docs` would be the list as it was when
+      // this upload started — so a delete that finished while the upload was
+      // in flight would be undone, and the deleted note would reappear. The
+      // function form is handed the list as it is right now instead.
+      //
+      // Either way it builds a NEW array rather than calling push(). React
+      // only redraws when it sees a different value, and push() changes the
+      // old array in place, so the note would be in the list and never show.
+      setDocs((current) => [created, ...current])
+    } catch (error) {
+      // The backend already writes a plain sentence for anything a person
+      // caused, and it is more useful than anything guessable here — it says
+      // whether the file was the wrong type, unreadable, or too long. Fall
+      // back to a generic line only if there was no sentence to show.
+      setNotice(
+        error.message ||
+          'That upload did not work. Check it is a PDF, TXT, MD or a photo, under 20 MB.',
+      )
     } finally {
       setBusy(false)
     }
   }
 
   /** #7 — runs when the X on a row is clicked. */
-  // eslint-disable-next-line no-unused-vars -- delete once the row below calls this
   async function handleDelete(id) {
     setNotice(null)
     try {
-      // TODO(Alif): #7 — await deleteDocument(id), then take it out of state:
-      //     setDocs(docs.filter((d) => d.id !== id))
+      await deleteDocument(id)
+
+      // Same function form as the upload, and for the same reason: delete two
+      // notes quickly and the second one would otherwise filter the list as it
+      // was before the first finished, putting the first note back on screen.
       //
-      //   filter returns a new array and leaves the old one alone, which is
-      //   exactly what React wants. This is the same "new value, not a changed
-      //   one" idea as the upload above — worth noticing that it came up twice.
-      throw new Error('TODO(Alif): the delete is not wired up yet')
+      // filter returns a new array and leaves the old one alone, which is what
+      // React wants — the same "a new value, not a changed one" idea as above.
+      setDocs((current) => current.filter((d) => d.id !== id))
     } catch {
       setNotice('Could not delete that note. Try again in a moment.')
     }
@@ -191,7 +227,7 @@ export default function App() {
             type="file"
             ref={fileInput}
             hidden
-            accept=".pdf,.txt,.md"
+            accept=".pdf,.txt,.md,.png,.jpg,.jpeg,.webp"
             onChange={handleFileChosen}
           />
 
@@ -199,10 +235,10 @@ export default function App() {
             type="button"
             className="btn btn--primary"
             style={{ marginLeft: 'auto' }}
-            disabled={busy}
+            disabled={busy || docsStatus !== 'ready'}
             onClick={() => fileInput.current.click()}
           >
-            {busy ? 'Adding…' : 'Add a note'}
+            {busy ? 'Reading…' : 'Add a note'}
           </button>
         </div>
 
@@ -217,10 +253,24 @@ export default function App() {
           <p style={{ color: 'var(--text-muted)' }}>Fetching your notes…</p>
         )}
 
+        {/*
+          A failed load used to be a dead end: the upload button stays disabled
+          until the list is known, and nothing here offered a way to try again,
+          so one dropped request meant a page refresh. This retries in place.
+        */}
         {docsStatus === 'failed' && (
-          <p style={{ color: 'var(--text-muted)' }}>
-            Could not load your notes. Check the backend is running, then refresh.
-          </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--gap)' }}>
+            <p style={{ color: 'var(--text-muted)', margin: 0 }}>
+              Could not load your notes. Check the backend is running.
+            </p>
+            <button
+              type="button"
+              className="btn btn--secondary"
+              onClick={() => setReloadKey((n) => n + 1)}
+            >
+              Try again
+            </button>
+          </div>
         )}
 
         {/*
@@ -236,46 +286,37 @@ export default function App() {
         {docsStatus === 'ready' && docs.length > 0 && (
           <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
             {/*
-              TODO(Alif): #5 — render one <li> per document.
-                docs.map((doc) => ( ...one row... )) goes here.
-
-                Every row needs key={doc.id}. React uses the key to tell rows
-                apart between redraws; without it, deleting the middle row can
-                leave the wrong one on screen. The id from the database is a
-                perfect key — do not use the array index, which changes when
-                something is removed.
-
-                One row looks like this. Copy it inside the map:
-
-                <li
-                  key={doc.id}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 'var(--gap-sm)',
-                    padding: 'var(--gap-sm) 0',
-                    borderBottom: '2px solid var(--border, #eee)',
-                  }}
-                >
-                  <span style={{ flex: 1 }}>{doc.filename}</span>
-                  <span style={{ color: 'var(--text-muted)' }}>
-                    {doc.page_count} {doc.page_count === 1 ? 'page' : 'pages'}
-                  </span>
-                  <button
-                    type="button"
-                    className="btn btn--secondary"
-                    aria-label={`Delete ${doc.filename}`}
-                    onClick={() => handleDelete(doc.id)}
-                  >
-                    ×
-                  </button>
-                </li>
-
-                The aria-label matters: on its own, "×" is read out as
-                "multiplication sign" by a screen reader, which tells somebody
-                nothing about which note it deletes. docs/design.md has the
-                accessibility floor this is part of.
+              One <li> per document. Every row needs key={doc.id}: React uses
+              the key to tell rows apart between redraws, and without it,
+              deleting the middle row can leave the wrong one on screen. The
+              database id is a perfect key — never the array index, which
+              changes the moment something is removed.
             */}
+            {docs.map((doc) => (
+              <li
+                key={doc.id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 'var(--gap-sm)',
+                  padding: 'var(--gap-sm) 0',
+                  borderBottom: '2px solid var(--border, #eee)',
+                }}
+              >
+                <span style={{ flex: 1 }}>{doc.filename}</span>
+                <span style={{ color: 'var(--text-muted)' }}>
+                  {doc.page_count} {doc.page_count === 1 ? 'page' : 'pages'}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn--secondary"
+                  aria-label={`Delete ${doc.filename}`}
+                  onClick={() => handleDelete(doc.id)}
+                >
+                  ×
+                </button>
+              </li>
+            ))}
           </ul>
         )}
       </section>
