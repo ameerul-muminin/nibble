@@ -39,7 +39,7 @@ def extract_text(data: bytes, filename: str) -> list[tuple[int, str]]:
             pages.append((page_num, text))
         return pages
 
-    if name.endswith((".txt", ".md", ".text", ".markdown")):
+    if name.endswith((".txt", ".md")):
         try:
             text = data.decode("utf-8")
         except UnicodeDecodeError:

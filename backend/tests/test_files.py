@@ -56,3 +56,15 @@ def test_extract_text_case_insensitive_extension():
     result = extract_text(content, "DOCUMENT.TXT")
     assert len(result) == 1
     assert result[0] == (1, "Case insensitive test")
+
+
+def test_extract_text_rejects_extensions_not_in_the_contract():
+    """docs/api.md promises .pdf, .txt and .md — nothing else.
+
+    These two used to be accepted here while the contract named only three
+    extensions. This test is what stops that drifting apart again.
+    """
+    content = b"Some notes"
+    for filename in ("notes.text", "notes.markdown"):
+        with pytest.raises(ValueError, match="Unsupported file type"):
+            extract_text(content, filename)
