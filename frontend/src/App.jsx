@@ -61,26 +61,40 @@ export default function App() {
   // fiddly bit, and it is the same three lines in every React app.
   const fileInput = useRef(null)
 
-  // Load the notes once, when the page first appears. Same shape as the health
-  // check above: an empty dependency list means "run this once, not on every
-  // redraw" — without it, setting state here would trigger another run and
-  // the page would fetch forever.
+  // Bumping this re-runs the load below. It is how the "Try again" button on
+  // the failed state works: change the value, the effect runs again.
+  const [reloadKey, setReloadKey] = useState(0)
+
+  // Load the notes. This is the one place that REPLACES the whole list rather
+  // than adjusting it, which makes it the one place that can throw away a
+  // change made while it was still in flight.
   //
-  // This is the one place that REPLACES the whole list rather than adjusting
-  // it, which makes it the one place that can throw away a change made while
-  // it was still in flight. Upload something before this arrives and the row
-  // would appear, then vanish when these rows landed on top of it. The upload
-  // button stays disabled until this finishes, so that window does not exist —
-  // and no row is on screen to delete yet either. Adding to a list you have
-  // not been shown is not a thing worth allowing anyway.
+  // `ignore` is the guard against that. When this effect is torn down — or run
+  // again — the old request is still out there and will still resolve, and
+  // without the flag its rows would land on top of whatever happened since.
+  // React's StrictMode runs every effect twice in development on purpose, to
+  // make exactly this bug show up on a laptop rather than in front of an
+  // audience. The cleanup function marks the old run as stale, so only the
+  // newest one is allowed to write anything.
   useEffect(() => {
+    let ignore = false
+    setDocsStatus('loading')
+
     listDocuments()
       .then((rows) => {
+        if (ignore) return
         setDocs(rows)
         setDocsStatus('ready')
       })
-      .catch(() => setDocsStatus('failed'))
-  }, [])
+      .catch(() => {
+        if (ignore) return
+        setDocsStatus('failed')
+      })
+
+    return () => {
+      ignore = true
+    }
+  }, [reloadKey])
 
   /** #5 — runs when a file has been chosen in the hidden input. */
   async function handleFileChosen(event) {
@@ -239,10 +253,24 @@ export default function App() {
           <p style={{ color: 'var(--text-muted)' }}>Fetching your notes…</p>
         )}
 
+        {/*
+          A failed load used to be a dead end: the upload button stays disabled
+          until the list is known, and nothing here offered a way to try again,
+          so one dropped request meant a page refresh. This retries in place.
+        */}
         {docsStatus === 'failed' && (
-          <p style={{ color: 'var(--text-muted)' }}>
-            Could not load your notes. Check the backend is running, then refresh.
-          </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--gap)' }}>
+            <p style={{ color: 'var(--text-muted)', margin: 0 }}>
+              Could not load your notes. Check the backend is running.
+            </p>
+            <button
+              type="button"
+              className="btn btn--secondary"
+              onClick={() => setReloadKey((n) => n + 1)}
+            >
+              Try again
+            </button>
+          </div>
         )}
 
         {/*
