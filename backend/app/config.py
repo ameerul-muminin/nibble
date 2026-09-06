@@ -44,9 +44,33 @@ OCR_ENABLED = os.getenv("OCR_ENABLED", "true").lower() == "true"
 # read and slower to send; 1600 is a good middle for handwriting.
 OCR_IMAGE_WIDTH = 1600
 
-# A scan of a whole textbook would eat the daily free allowance in one upload,
-# so refuse politely past this many pages rather than silently burning it.
-OCR_MAX_PAGES = 20
+# How many pages of a scan we will read in one upload.
+#
+# This is small for a real reason, found by running it. The free tier allows
+# 1000 output tokens PER MINUTE, and it reserves against max_tokens below
+# rather than against what actually comes back — so the real throughput is
+# about two pages a minute, not two hundred. Five pages is already a two and a
+# half minute upload. Twenty would look like the app had hung.
+OCR_MAX_PAGES = 5
+
+# How much text we allow back from one page.
+#
+# This is not a preference, it is a hard requirement. Groq's free tier caps
+# OUTPUT tokens per minute at 1000, and it checks the *expected* output before
+# running anything — which, with no limit set, is the model's maximum. The
+# request is then rejected with a 429 before a single page is read. Asking for
+# 900 keeps it under the cap.
+#
+# 450 tokens is roughly 300-350 words, which comfortably covers a normal page of
+# handwritten notes. It is deliberately not higher: the cap is per minute and is
+# reserved against this number, so doubling it halves how many pages we can read
+# in a minute. A very dense page could be cut short — that trade is on purpose.
+OCR_MAX_OUTPUT_TOKENS = 450
+
+# When the per-minute allowance runs out mid-scan, wait and try that page again
+# rather than failing an upload that was halfway done.
+OCR_RETRY_ATTEMPTS = 3
+OCR_RETRY_WAIT_SECONDS = 20
 
 # --- Tuning knobs --------------------------------------------------------
 CHUNK_SIZE = 900  # how many characters in one piece of a document

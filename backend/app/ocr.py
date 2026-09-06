@@ -26,6 +26,7 @@ searching, answering — carries on without knowing any of this happened.
 """
 
 import base64
+import time
 from io import BytesIO
 
 import pypdfium2
@@ -78,12 +79,37 @@ def page_images(pdf_bytes: bytes, max_pages: int) -> list[tuple[int, bytes]]:
         pdf.close()
 
 
-def read_image(png_bytes: bytes) -> str:
-    """Ask the vision model what a single picture says.
+class RateLimited(OcrUnavailable):
+    """Out of allowance for the moment. Unlike its parent, this one is worth retrying."""
 
-    Raises OcrUnavailable if the request fails for any reason. The caller turns
-    that into a plain sentence — the user never sees a provider error.
+
+def read_image(png_bytes: bytes) -> str:
+    """Ask the vision model what a single picture says, waiting out rate limits.
+
+    The free tier allows 1000 output tokens a minute and reserves against
+    max_tokens rather than what actually comes back, so roughly two pages fit
+    in a minute. Reading page three of a scan therefore hits the limit as a
+    matter of course, not as an error — so waiting and trying again is the
+    normal path here, not an exceptional one.
+
+    Raises OcrUnavailable if it still cannot be read. The caller turns that
+    into a plain sentence; the user never sees a provider error.
     """
+    for attempt in range(config.OCR_RETRY_ATTEMPTS):
+        try:
+            return _request_transcription(png_bytes)
+        except RateLimited:
+            last = attempt == config.OCR_RETRY_ATTEMPTS - 1
+            if last:
+                raise
+            time.sleep(config.OCR_RETRY_WAIT_SECONDS)
+
+    # Unreachable: the loop either returns or raises on its final attempt.
+    raise OcrUnavailable("Nibble could not read that page.")
+
+
+def _request_transcription(png_bytes: bytes) -> str:
+    """One attempt at reading one picture. Raises RateLimited if it is worth retrying."""
     if not config.GROQ_API_KEY:
         raise OcrUnavailable(
             "No GROQ_API_KEY is set, so there is nothing to send the page to. "
@@ -115,6 +141,17 @@ def read_image(png_bytes: bytes) -> str:
                 # Transcription, not invention. Low temperature keeps it copying
                 # what is on the page rather than guessing plausible words.
                 "temperature": 0,
+                # Required, not optional — see OCR_MAX_OUTPUT_TOKENS in config.
+                # Without it Groq assumes the model's maximum, decides that
+                # exceeds the free tier's output-per-minute cap, and rejects the
+                # request with a 429 before reading anything.
+                "max_tokens": config.OCR_MAX_OUTPUT_TOKENS,
+                # This model thinks out loud by default, and wraps the thinking
+                # in <think> tags before the answer. Two problems: the tags end
+                # up stored as if they were your notes, and the thinking burns
+                # the output budget above — enough of it to truncate a real
+                # page. Transcribing does not need reasoning; it needs reading.
+                "reasoning_effort": "none",
             },
             timeout=_TIMEOUT_SECONDS,
         )
@@ -122,7 +159,17 @@ def read_image(png_bytes: bytes) -> str:
         raise OcrUnavailable(f"Could not reach the reading service: {exc}") from exc
 
     if response.status_code == 429:
-        raise OcrUnavailable("The free daily limit for reading handwriting has run out.")
+        # 429 covers both "too many just now" and "nothing left today", and the
+        # two need different advice. Groq says which in the body; the wording
+        # below is ours, because theirs mentions upgrading to a paid tier and
+        # this project does not have one.
+        body = response.text.lower()
+        if "per day" in body or "rpd" in body:
+            # Nothing left today. Waiting will not help, so do not retry.
+            raise OcrUnavailable(
+                "Nibble has read as much handwriting as it can today. Try again tomorrow."
+            )
+        raise RateLimited("Nibble is reading too much at once.")
 
     if not response.ok:
         # Deliberately not passing the provider's message through — it is not
@@ -130,9 +177,22 @@ def read_image(png_bytes: bytes) -> str:
         raise OcrUnavailable(f"The reading service answered with {response.status_code}.")
 
     try:
-        return response.json()["choices"][0]["message"]["content"].strip()
+        return _strip_thinking(response.json()["choices"][0]["message"]["content"])
     except (KeyError, IndexError, ValueError) as exc:
         raise OcrUnavailable("The reading service sent back something unexpected.") from exc
+
+
+def _strip_thinking(text: str) -> str:
+    """Remove a <think>...</think> block if the model produced one anyway.
+
+    reasoning_effort="none" should stop these appearing at all. This is here
+    because the cost of being wrong is silent and nasty: the thinking would be
+    stored as though it were the words on the page, then chunked, embedded, and
+    eventually quoted back to a student as their own notes.
+    """
+    if "</think>" in text:
+        text = text.split("</think>", 1)[1]
+    return text.strip()
 
 
 def read_pdf(pdf_bytes: bytes) -> list[tuple[int, str]]:

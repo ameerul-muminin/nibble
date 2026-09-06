@@ -354,10 +354,20 @@ that has text in it.
 whole second system to explain, and the honest cost is a slow upload rather
 than a hidden one. The button says "Reading…" while it works.
 
-**Capped at `OCR_MAX_PAGES` (20).** The free tier is roughly 250 requests a day
-and each page is one request, so somebody scanning a whole textbook would burn
-the day's allowance in a single upload. Past the cap it is refused with a
-sentence suggesting the file be split.
+**Capped at `OCR_MAX_PAGES` (5).** Not for the reason first assumed. The daily
+request count is generous; the binding limit is 1000 output tokens *per minute*,
+reserved against `max_tokens`, which works out at about two pages a minute. Five
+pages is a two-and-a-half minute upload and twenty would look like a hang. Past
+the cap it is refused with a sentence suggesting the file be split.
+
+**`reasoning_effort: "none"`, and a stripper for `<think>` blocks.** This model
+reasons out loud by default. That reasoning would otherwise be stored as though
+it were the words on the page — chunked, embedded, and quoted back to a student
+as their own notes.
+
+**A rate-limited page waits and retries.** Running out of per-minute allowance
+partway through a scan is the ordinary case, not a failure, so it should not
+kill an upload that was already half done.
 
 **`OCR_ENABLED` can switch it off.** If it misbehaves on demo day, one setting
 turns it off and scans get refused politely instead of failing oddly.
@@ -369,9 +379,11 @@ silent failure this slice exists to remove.
 ### Costs, accepted
 
 - **Uploads get slow for scans.** Seconds per page, in the request.
-- **~250 pages a day**, free tier, shared with Slice 4's chat calls. Fine for
-  three developers; a demo where the audience uploads their own scans could hit
-  it, so have a spare key.
+- **About two pages a minute**, which is the limit that actually bites — 1000
+  output tokens per minute, reserved against `max_tokens`. The daily request
+  count is generous by comparison. A five-page scan is a two-and-a-half minute
+  upload, and it is shared with Slice 4's chat calls, so have a spare key for
+  demo day.
 - **Quality is good, not perfect.** Neat handwriting transcribes well; messy
   cursive will have errors, and those errors flow into search and answers.
 - **The key is now needed earlier than Slice 4.** `first-week.md` and
@@ -386,20 +398,45 @@ silent failure this slice exists to remove.
 - [x] The fallback and all its error sentences in `POST /documents`
 - [x] Photo uploads accepted by the file picker; the button reads "Reading…"
 - [x] `api.js` surfaces the backend's sentence instead of a status code
-- [x] 11 tests covering it, with the vision call stubbed. **44 tests pass.**
+- [x] 15 tests covering it, with the vision call stubbed. **48 tests pass.**
 - [x] `api.md`, `.env.example` and `first-week.md` all updated
 
-### Not verified against the real API
+### Verified against the real API, and what that changed
 
-**There is no `GROQ_API_KEY` on this machine, so the live vision call has never
-actually run.** Everything around it is tested — the scan detection, the PNG
-rendering (really producing PNGs through `pypdfium2`), the fallback, the error
-handling, the switch-off — but the request itself is stubbed in tests.
+**It works.** A three-page image-only PDF was uploaded through the real route
+with a real key: detected as a scan, every page read, `201` in 24 seconds.
 
-The request shape follows Groq's documented vision format, and the model id
-comes from their current model list. **Someone has to put a key in `.env` and
-upload a real handwritten page before this is trusted.** Until that happens,
-treat it as written-but-unproven.
+Three things only showed up by actually running it, and none would have been
+found by reading the code:
+
+**1. `max_tokens` is required, not optional.** Without it the first call failed
+with a 429 before reading anything. Groq reserves against the *expected* output,
+which with no limit set is the model's maximum — 1192 tokens against a cap of
+1000. Nothing had been read, nothing had been spent, and the error said "rate
+limit" while the account had its full allowance untouched.
+
+**2. This model thinks out loud.** The first successful call returned 400 words
+of `<think>` reasoning — *"Wait, looking closer at the bottom part…"* — before
+the answer. Stored as-is, that reasoning would have been chunked, embedded and
+eventually quoted back to a student as their own notes. Fixed with
+`reasoning_effort: "none"`, plus a stripper for the block in case it ever
+appears anyway, because the failure is silent and the cost is high.
+
+**3. The real throughput is about two pages a minute.** The 1000-token cap is
+per minute and is reserved against `max_tokens`, so the page budget is far
+tighter than the daily request count suggests. Hitting it mid-scan is the
+normal path, not an error, so a rate-limited page now waits and tries again
+rather than failing an upload that was halfway done.
+
+That last one is why **`OCR_MAX_PAGES` is 5, not 20.** Five pages is already a
+two-and-a-half minute upload; twenty would look like the app had hung. The
+original 20 was a guess made from the daily request limit, and it was wrong.
+
+**Still not verified: quality on real handwriting.** Everything above was tested
+with rendered type, which is easier to read than a person's writing. Neat
+handwriting should be fine and messy cursive will have errors — but nobody has
+put an actual handwritten page through it yet, and until someone does, the
+quality claim is an expectation rather than a result.
 
 ### Still open
 

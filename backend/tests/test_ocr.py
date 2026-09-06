@@ -185,3 +185,69 @@ def test_page_images_draws_one_png_per_page():
     assert [number for number, _ in images] == [1, 2]
     for _, png in images:
         assert png.startswith(b"\x89PNG"), "not a PNG"
+
+
+# ---------------------------------------------------------------------------
+# Waiting out the per-minute limit
+# ---------------------------------------------------------------------------
+
+
+def test_a_rate_limited_page_is_retried_rather_than_failing(monkeypatch):
+    """Hitting the per-minute cap mid-scan is normal, not exceptional.
+
+    The free tier reserves against max_tokens, so roughly two pages fit in a
+    minute. Page three of a scan therefore hits the limit as a matter of
+    course — failing the whole upload there would be wrong.
+    """
+    monkeypatch.setattr(config, "OCR_RETRY_WAIT_SECONDS", 0)
+    monkeypatch.setattr(config, "OCR_RETRY_ATTEMPTS", 3)
+
+    attempts = []
+
+    def _limited_twice(png):
+        attempts.append(1)
+        if len(attempts) < 3:
+            raise ocr.RateLimited("Nibble is reading too much at once.")
+        return "Osmosis moves water."
+
+    monkeypatch.setattr(ocr, "_request_transcription", _limited_twice)
+
+    assert ocr.read_image(b"png") == "Osmosis moves water."
+    assert len(attempts) == 3
+
+
+def test_giving_up_after_the_last_retry(monkeypatch):
+    monkeypatch.setattr(config, "OCR_RETRY_WAIT_SECONDS", 0)
+    monkeypatch.setattr(config, "OCR_RETRY_ATTEMPTS", 2)
+
+    def _always_limited(png):
+        raise ocr.RateLimited("Nibble is reading too much at once.")
+
+    monkeypatch.setattr(ocr, "_request_transcription", _always_limited)
+
+    with pytest.raises(ocr.OcrUnavailable):
+        ocr.read_image(b"png")
+
+
+def test_the_daily_limit_is_not_retried(monkeypatch):
+    """Waiting cannot fix "nothing left today", so it must not sit there retrying."""
+    monkeypatch.setattr(config, "OCR_RETRY_WAIT_SECONDS", 0)
+    calls = []
+
+    def _out_for_the_day(png):
+        calls.append(1)
+        raise ocr.OcrUnavailable("Nibble has read as much handwriting as it can today.")
+
+    monkeypatch.setattr(ocr, "_request_transcription", _out_for_the_day)
+
+    with pytest.raises(ocr.OcrUnavailable, match="today"):
+        ocr.read_image(b"png")
+    assert len(calls) == 1, "a daily limit must not be retried"
+
+
+def test_thinking_tags_never_reach_the_stored_text():
+    """If the model thinks out loud anyway, that must not be stored as your notes."""
+    thought = "<think>The user wants the text. Let me look.</think>\nOsmosis moves water."
+
+    assert ocr._strip_thinking(thought) == "Osmosis moves water."
+    assert ocr._strip_thinking("Just the answer.") == "Just the answer."
