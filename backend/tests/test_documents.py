@@ -209,7 +209,9 @@ def test_upload_with_windows_style_traversal_filename(client, tmp_path):
 
     This one is why the cleaning does not just call Path(...).name: on Linux a
     backslash is an ordinary character in a filename, so Path would hand the
-    whole dangerous string straight back.
+    whole string straight back and the upload would be stored inside uploads/
+    under that literal name. Not an escape on Linux — but not the same answer
+    the same upload gets on Windows either, which is reason enough to normalise.
     """
     response = client.post(
         "/documents",

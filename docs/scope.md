@@ -123,8 +123,11 @@ loudly**, which is why each got a test that fails against the old code:
 - [x] **`PRAGMA foreign_keys = ON` in `db.py`.** SQLite defaults it OFF, *per
       connection*. Without it `ON DELETE CASCADE` does nothing and says nothing, so
       #6 would have looked correct while leaving orphaned chunks behind.
-- [x] **The `chunks` table, with its `embedding` column and index.** Created in
-      Slice 1 as already decided below, not in Slice 2.
+- [x] **The `chunks` table**, with every column created up front — `embedding`
+      included, TEXT and NULL until Slice 3 fills it — plus a plain index on
+      `document_id`. To be unambiguous, because the wording here first read as though
+      it might have been one: that is **not** an index on the vectors. The ADR rules
+      that out and nothing here changes it.
 - [x] **Extension drift.** `.text` and `.markdown` were accepted by the code and
       absent from `docs/api.md`. The contract won; a test now pins the three.
 - [x] **The one `async def`.** A comment now says why `upload_document` is the
@@ -133,17 +136,27 @@ loudly**, which is why each got a test that fails against the old code:
       stored as `pwned.txt`, `.markdown` rejected with 400, normal upload 201.
 
 **The bit worth keeping: `Path(...).name` is not the same function on every machine.**
-The first fix used it directly. It passed every test on Windows and failed on CI,
-because `pathlib` follows the rules of whatever platform it runs on — Windows treats
-both `/` and `\` as separators, Linux treats a backslash as an ordinary character in a
-filename. So the same line strips the path on a laptop and returns the whole dangerous
-string on a server.
+The first fix used it directly. It passed on Windows and failed on CI, because
+`pathlib` follows the rules of whatever platform it runs on — Windows treats both `/`
+and `\` as separators, Linux treats a backslash as an ordinary character in a filename.
 
-The cleaning now normalises separators before taking the last piece, so the answer is
-the same everywhere. Two things this is worth remembering for:
+**Being precise about what that did and did not mean**, because the first version of
+this note overstated it. `Path(...).name` *did* stop the traversal, on both platforms:
+the dangerous shape is `../../x.txt` with forward slashes, and `.name` reduces that to
+`x.txt` everywhere. What it got wrong on Linux was the other shape — `..\..\x.txt` came
+back untouched, and the upload was then written to a file called literally
+`..\..\x.txt` **inside** `uploads/`. A daft filename, not an escape.
 
-- **Security code that only works on the machine you wrote it on is not security code.**
-  Local green meant nothing here; the Linux run was the real check.
+So this was a consistency bug rather than a second security hole: the same upload
+produced a different stored filename depending on the machine, and left a name still
+carrying separators — which is a path again the moment anything Windows-shaped reads
+it. `_safe_filename()` normalises first, so every machine stores the same clean name.
+
+Two things it is worth remembering for:
+
+- **Test what you assume is platform-independent.** `pathlib` looks like it abstracts
+  the platform away. It does the opposite — it faithfully implements whichever one it
+  is running on. Local green meant nothing here; the Linux run was the real check.
 - It is a concrete answer to "why bother with CI when it passes on my laptop", which is
   a fair thing to have been wondering.
 
@@ -178,20 +191,39 @@ Upload a PDF, see it in a list, delete it. The contract is written in
 
 ### Decided
 
-**A filename from a client is untrusted input.** Uploads are written with
-`Path(filename).name`, never the raw value, because a name like `../../something`
-otherwise escapes the uploads directory. This is the first place in the project where
-"never trust the client" stops being an abstraction, and it is worth understanding
-rather than pasting.
+**A filename from a client is untrusted input.** Uploads are written through
+`_safe_filename()` in `routes.py`, never the raw value, because a name like
+`../../something` otherwise escapes the uploads directory.
+
+**Do not reach for `Path(filename).name` on its own.** This decision used to say
+exactly that, and it is incomplete: `pathlib` follows the rules of the platform it
+runs on, so that line strips a `\` on Windows and leaves it as part of the filename
+on Linux. `_safe_filename()` normalises both separators before taking the last piece,
+producing the same clean filename everywhere. Corrected 2026-09-06 after CI caught the
+platform-dependent result — see the review record above.
+
+This is the first place in the project where "never trust the client" stops being an
+abstraction, and it is worth understanding rather than pasting.
 
 **`PRAGMA foreign_keys = ON` on every connection.** SQLite has foreign keys **off** by
 default, which means a cascade delete silently does nothing at all. `DELETE
 /documents/{id}` in #6 depends on it, so it lands with `db.py` rather than being
 discovered later as a mystery.
 
-**The schema needs `chunks` from the start, not just `documents`.** Slice 2 stores
-chunks and Slice 3 adds an `embedding` column on them (TEXT, holding JSON). Designing
-the table once, now, is cheaper than migrating a SQLite file later.
+**The schema needs `chunks` from the start, not just `documents`.** Every column is
+**created now, in Slice 1**, including `embedding` (TEXT, holding JSON). Slice 2 starts
+inserting chunk rows and Slice 3 starts filling `embedding` in — it is NULL until then,
+but the column already exists and neither slice alters the table. Designing it once,
+now, is cheaper than migrating a SQLite file later.
+
+This used to read "Slice 3 adds an `embedding` column", which contradicted the sentence
+right after it about not migrating later. Slice 3 *fills* the column; it does not add
+it. Clarified 2026-09-06.
+
+**The only index is on `document_id`**, because every chunk lookup is "the chunks
+belonging to this document". There is deliberately **no index on the vectors** —
+[`adr/0001-sqlite-and-numpy.md`](./adr/0001-sqlite-and-numpy.md) rules that out on
+purpose, and nothing in Slice 1 changes it.
 
 **The allowed extensions and `api.md` must say the same thing.** They drifted once
 already — the code accepted `.text` and `.markdown` while the contract named only
