@@ -9,7 +9,6 @@
  */
 
 import { SignInButton, SignUpButton } from '@clerk/react'
-import { Mascot } from './Mascot'
 import '../styles/landing.css'
 
 const STEPS = [
@@ -35,7 +34,6 @@ export function Landing() {
     <div className="landing">
       <header className="landing-nav">
         <div className="landing-brand">
-          <Mascot size={44} mood="idle" />
           <span className="landing-word">Nibble</span>
         </div>
         {/*
@@ -55,7 +53,11 @@ export function Landing() {
       <main className="landing-main">
         <section className="card landing-hero">
           <div className="landing-hero-mascot">
-            <Mascot size={180} mood="thinking" />
+            <img
+              src="/wave-nibble.svg"
+              alt="Nibble, waving"
+              className="landing-hero-art"
+            />
             <span className="streak" aria-label="Study streak">
               ★ 3-day streak
             </span>
@@ -94,7 +96,7 @@ export function Landing() {
           <div className="landing-chat">
             <p className="bubble bubble--user">explain osmosis simply</p>
             <div className="landing-cat-row">
-              <Mascot size={48} mood="idle" />
+              <img src="/wave-nibble.svg" alt="Nibble" className="landing-chat-art" />
               <div>
                 <p className="bubble bubble--cat">
                   Water moves across a membrane toward the side with more solute.

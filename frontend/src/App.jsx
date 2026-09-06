@@ -13,7 +13,6 @@ import { useEffect, useRef, useState } from 'react'
 import { Show, UserButton } from '@clerk/react'
 import { deleteDocument, getChunks, getHealth, listDocuments, uploadDocument } from './api'
 import { Landing } from './components/Landing'
-import { Mascot } from './components/Mascot'
 import './styles/global.css'
 
 // What we say for each state. Errors tell you what to DO, never just "error".
@@ -254,7 +253,6 @@ export default function App() {
           marginBottom: 'var(--gap-lg)',
         }}
       >
-        <Mascot size={80} mood={status === 'checking' ? 'thinking' : 'idle'} />
         <div>
           <h1>Nibble</h1>
           <p style={{ margin: 0, color: 'var(--text-muted)' }}>

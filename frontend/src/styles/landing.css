@@ -172,3 +172,17 @@
     padding: 10px 14px;
   }
 }
+
+/* The waving mascot. Height is set and width follows, so the SVG keeps its
+   356x408 shape instead of being squashed to fit a box. */
+.landing-hero-art {
+  height: 200px;
+  width: auto;
+  display: block;
+}
+
+.landing-chat-art {
+  height: 48px;
+  width: auto;
+  flex-shrink: 0;
+}
