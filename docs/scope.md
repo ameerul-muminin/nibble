@@ -53,8 +53,8 @@ already closed.
 | #   | Slice                 | Milestone                 | Status                  |
 | --- | --------------------- | ------------------------- | ----------------------- |
 | 0   | The two programs talk | —                         | done, merged            |
-| 1   | Upload and list       | Slice 1 — Upload and list | built, PR open           |
-| 1.5 | Handwriting and scans | — (unplanned)             | built, PR open           |
+| 1   | Upload and list       | Slice 1 — Upload and list | done, merged            |
+| 1.5 | Handwriting and scans | — (unplanned)             | done, merged            |
 | 2   | Chunking              | Slice 2 — Chunking        | open                    |
 | 3   | Search, no AI yet     | Slice 3 — Search          | open                    |
 | 4   | Nibble answers        | Slice 4 — Nibble answers  | open                    |
@@ -68,30 +68,48 @@ dropped if time runs out.
 "osmosis" and watching the right paragraph surface. It's the moment RAG stops being
 magic, and it's a working demo on its own even if everything after it fails.
 
-## Current state, 2026-09-06
+## Current state, 2026-09-06 (evening)
 
-**Correcting the mirror.** The section below used to say "three pull requests are
-open, and nothing has merged in three weeks", dated 2026-08-29. That was wrong on the
-day it was written: #26 and #27 had both already merged. GitHub wins on status, so
-this is the correction, said out loud rather than quietly fixed — which is exactly the
-failure mode the rule at the top of this file exists to catch.
+`main` is at `b95aee2`. **Every open pull request has merged — there are none
+left.** #24, #25, #28, #29, #30 and #31 all landed today, after the queue had sat
+untouched for four weeks.
 
-22 issues, **0 closed**. `main` is at `683a7ed`.
+Slices 0, 1 and 1.5 are in `main` and work. You can upload a PDF, a text file, a
+Markdown file or a photo, see it listed, and delete it — and a scanned or
+handwritten PDF gets read by a vision model instead of silently arriving empty.
 
-| PR  | Branch                       | Opened     | State                                  |
-| --- | ---------------------------- | ---------- | -------------------------------------- |
-| #24 | `feat/extract-text`          | 2026-08-09 | open, review findings fixed, CI green  |
-| #25 | `feat/upload-list-documents` | 2026-08-10 | open, review findings fixed, CI green  |
-| #26 | `chore/workflow-skills`      | 2026-08-20 | **merged** 2026-08-29                  |
-| #27 | `feat/clerk-auth`            | —          | **merged** 2026-08-29                  |
+### The board disagrees with the code, and the board is what counts
 
-Review order is still **#24, then #25**. #25 contains #24's commit and targets `main`
-directly, so merging #25 alone would land both — #24 goes first anyway, so the
-authorship of each piece stays visible.
+**22 issues, 1 closed.** Only #5 is closed. **#2, #3, #4, #6 and #7 are all built
+and merged into `main`, and all still open on GitHub.**
 
-**No issue has ever been closed.** Twenty-two open, zero done, across five weeks. The
-bottleneck is the review queue, not a missing feature, and it stays the bottleneck
-until #24 and #25 land.
+The checkboxes below stay unticked, because the rule at the top of this file is
+that an issue is done when it is closed and not when a box here is ticked. Saying
+it out loud rather than quietly ticking them is the point. **Those five issues
+should be closed**, and until they are, this project looks from the outside like
+it has finished one thing in five weeks.
+
+### Two things that are true and easy to misread as "finished"
+
+**The extracted text is currently thrown away.** `extract_text` runs only to count
+pages; nothing stores the words. `chunks` is empty. So a 31-page upload today
+holds a filename, a page count and a date, and not one searchable word. That is
+Slice 2's job and it is not built — but it means an upload that *looks* completely
+successful has produced nothing to search yet.
+
+It also means a scanned upload spends vision tokens transcribing every page and
+then discards the result. Harmless while testing; worth fixing early in Slice 2
+rather than after somebody burns a day's allowance on it.
+
+**A note appearing in the list is not proof the text came out.** The first real
+upload after the merge was `ch1 DB.pdf` — 31 pages, listed, looking perfect. It
+was the Silberschatz textbook slides: a typed PDF with a 14,923-character text
+layer, so `has_no_text` was False and the vision model was never called. The
+handwriting path was not exercised at all.
+
+The giveaway was in the data: 31 pages, against an `OCR_MAX_PAGES` of 5. A real
+scan that long would have been refused. **Nobody has yet put an actual handwritten
+page through this** — see the Slice 1.5 verification notes below.
 
 ### Clerk sign-in landed outside the plan
 
@@ -245,12 +263,16 @@ become `notes.txt` and collide, which is the same known behaviour, not a new bug
 
 ### Checklist
 
-- [ ] #2 `db.py` — the SQLite connection and schema _(Alif)_
-- [ ] #3 `extract_text()` — pull the words out of a file _(Fahim, PR #24)_
-- [ ] #4 `POST /documents` and `GET /documents` _(Fahim, PR #25)_
-- [ ] #5 The notes list and an upload button _(built, PR #30)_
-- [ ] #6 `DELETE /documents/{id}` _(built, PR #30)_
-- [ ] #7 A delete button on each note _(built, PR #30)_
+Every one of these is **built and merged into `main`**. The boxes are unticked
+because five of the six issues are still open on GitHub, and GitHub wins on
+status. Close them and tick these together.
+
+- [ ] #2 `db.py` — the SQLite connection and schema _(merged in #25; still open)_
+- [ ] #3 `extract_text()` — pull the words out of a file _(merged in #24; still open)_
+- [ ] #4 `POST /documents` and `GET /documents` _(merged in #25; still open)_
+- [x] #5 The notes list and an upload button _(merged in #31; **closed**)_
+- [ ] #6 `DELETE /documents/{id}` _(merged in #31; still open)_
+- [ ] #7 A delete button on each note _(merged in #31; still open)_
 
 ### Built, 2026-09-06
 
@@ -437,6 +459,25 @@ with rendered type, which is easier to read than a person's writing. Neat
 handwriting should be fine and messy cursive will have errors — but nobody has
 put an actual handwritten page through it yet, and until someone does, the
 quality claim is an expectation rather than a result.
+
+**The first attempt at verifying it did not verify it.** After the merge, a file
+was uploaded believing it was handwritten, it appeared in the list, and that was
+read as the feature working. It was `ch1 DB.pdf`, the Silberschatz textbook
+slides — a typed PDF carrying a 14,923-character text layer, so `has_no_text` was
+False and no vision call happened.
+
+This is worth keeping because the mistake is the natural one to make: **a note
+appearing in the list proves the upload worked, and says nothing about where the
+text came from — or whether there was any.** Two ways to tell them apart without
+guessing:
+
+- A real scan of more than five pages is *refused*. That upload was 31 pages and
+  went through, which alone proved it was not being treated as a scan.
+- A real scan is slow. Roughly two pages a minute, with the button reading
+  "Reading…". Instant means there was a text layer.
+
+Until a genuinely handwritten file of five pages or fewer has been through it, the
+verification below stands as "the API works", not "handwriting works".
 
 ### Still open
 
