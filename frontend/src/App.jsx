@@ -10,7 +10,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { Show, UserButton } from '@clerk/react'
+import { useAuth, UserButton } from '@clerk/react'
 import { deleteDocument, getChunks, getHealth, listDocuments, uploadDocument } from './api'
 import { Landing } from './components/Landing'
 import './styles/global.css'
@@ -23,6 +23,12 @@ const MESSAGES = {
 }
 
 export default function App() {
+  // Who is looking at this? isLoaded is false for the first moment, while Clerk
+  // checks the browser for an existing session. Both flags matter: <Show> was
+  // used here before and it renders NOTHING while loading, which is invisible
+  // when it wraps one button and a blank white page when it wraps the whole app.
+  const { isLoaded, isSignedIn } = useAuth()
+
   // useState remembers a value between redraws. Calling setStatus tells React
   // the value changed, and React redraws whatever uses it.
   const [status, setStatus] = useState('checking')
@@ -236,16 +242,24 @@ export default function App() {
     }
   }
 
-  // Signed-out visitors get the Duolingo-style landing page.
-  // Signed-in users skip it and go straight to the app below.
+  // Clerk has not answered yet. Say so, rather than drawing a blank page that
+  // looks broken. It is normally too fast to read.
+  if (!isLoaded) {
+    return (
+      <main style={{ maxWidth: 620, margin: '0 auto', padding: 'var(--gap-xl) var(--gap-lg)' }}>
+        <p style={{ color: 'var(--text-muted)' }}>Waking Nibble up…</p>
+      </main>
+    )
+  }
+
+  // Signed-out visitors get the landing page and nothing else.
+  if (!isSignedIn) {
+    return <Landing />
+  }
+
   return (
-    <>
-      <Show when="signed-out">
-        <Landing />
-      </Show>
-      <Show when="signed-in">
-        <main style={{ maxWidth: 620, margin: '0 auto', padding: 'var(--gap-xl) var(--gap-lg)' }}>
-          <header
+    <main style={{ maxWidth: 620, margin: '0 auto', padding: 'var(--gap-xl) var(--gap-lg)' }}>
+      <header
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -513,8 +527,6 @@ export default function App() {
           )}
         </section>
       )}
-        </main>
-      </Show>
-    </>
+    </main>
   )
 }
