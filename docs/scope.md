@@ -247,26 +247,68 @@ become `notes.txt` and collide, which is the same known behaviour, not a new bug
 - [ ] #2 `db.py` — the SQLite connection and schema _(Alif)_
 - [ ] #3 `extract_text()` — pull the words out of a file _(Fahim, PR #24)_
 - [ ] #4 `POST /documents` and `GET /documents` _(Fahim, PR #25)_
-- [ ] #5 The notes list and an upload button _(Arman)_
-- [ ] #6 `DELETE /documents/{id}` _(Fahim)_
-- [ ] #7 A delete button on each note _(Arman)_
+- [ ] #5 The notes list and an upload button _(scaffolded, behaviour open)_
+- [ ] #6 `DELETE /documents/{id}` _(scaffolded, behaviour open)_
+- [ ] #7 A delete button on each note _(scaffolded, behaviour open)_
 
-### Open question, needs a decision
+### The scaffold, 2026-09-06
 
-**What shape does the frontend scaffold take?** #5 asks for API functions, `useState`,
-`useEffect`, array rendering and the hidden-file-input `ref` trick — five unfamiliar
-ideas at once. The agreed model is "the lead scaffolds, they build". Three options, in
-order of preference:
+The open question below is now answered: **layout and TODOs**, option 1. What
+changed from the original plan is *who fills them in* — Alif is taking most of the
+remaining work directly rather than handing #5, #6 and #7 over, so the markers read
+`TODO(Alif)`. The three issues are still open on GitHub and should be reassigned
+there if that is the standing arrangement rather than a one-off, because right now
+the board and the code disagree about who is doing this.
 
-1. **Layout and TODOs.** Page structure, component shells, CSS classes and props are
-   built; every piece of behaviour is left marked `TODO`. The interesting half is
-   learned and the fiddly half is skipped. _Recommended._
-2. **One worked example.** The upload card is built completely and correctly, and the
-   rest are shells to imitate.
-3. **Full static UI with fake data.** Motivating, but no component ever gets designed.
+Built, and deliberately not left as an exercise:
 
-Also worth deciding: whether to pull the `Button` component (#18, Slice 5) forward, so
-no raw `<button>` gets written now and replaced later.
+- [x] `DELETE /documents/{document_id}` route in `routes.py` — decorator, path
+      parameter, `204` status, docstring. The existence check and the delete are
+      `TODO`, including the cascade-versus-manual choice #6 asks to be justified.
+- [x] Four named, skipped tests for that route in `test_documents.py`. `pytest -q`
+      reports them as skipped, so what is left is visible rather than remembered.
+- [x] `listDocuments`, `uploadDocument`, `deleteDocument` shells in `api.js`, with
+      the `Content-Type` trap written out — the browser must set that header itself
+      for `multipart/form-data`, and setting it by hand gives a 422 that looks like
+      a bad file.
+- [x] The "Your notes" card in `App.jsx`: heading, upload button, hidden file input
+      wired through a `ref`, loading, failed and empty states, and the row markup
+      written out as a comment inside the `map` that still needs writing.
+- [x] The `×` button carries an `aria-label`. On its own it is read aloud as
+      "multiplication sign", which says nothing about which note it deletes.
+
+Left open on purpose: the `useEffect` that loads the notes, the two state updates
+after upload and delete, and the `docs.map` that renders the rows.
+
+**A note on the `eslint-disable` lines.** `npm run lint` runs with
+`--max-warnings 0`, so a scaffold that imports things it does not use yet fails CI.
+Each unused symbol carries a targeted `// eslint-disable-next-line no-unused-vars`
+saying which TODO removes it. They are a to-do list: **when the last one is gone and
+lint still passes, the wiring is finished.** They are not a pattern to copy — a
+disable comment anywhere else needs a much better reason.
+
+**Not pulling `Button` (#18) forward.** `global.css` already has `.btn`,
+`.btn--primary` and the solid-edge press, so the scaffold uses those classes on
+plain `<button>` elements. Slice 5 wraps them into a component, which is a
+mechanical change with nothing written twice, and #18 stays a real piece of work.
+
+### Answered, 2026-09-06 — what shape the frontend scaffold takes
+
+**Option 1, layout and TODOs.** #5 asks for API functions, `useState`, `useEffect`,
+array rendering and the hidden-file-input `ref` trick — five unfamiliar ideas at once,
+which is what made this worth asking. The other two were:
+
+2. **One worked example.** The upload card built completely, the rest shells to
+   imitate. More to copy from, but the first component gets designed for you.
+3. **Full static UI with fake data.** Motivating and demos immediately, but no
+   component ever actually gets designed.
+
+Option 1 won because the fiddly half — the `ref` plumbing, clearing the input value so
+the same file can be picked twice, the empty and failed states — is trivia rather than
+an idea, and the interesting half is small enough to be worth writing by hand.
+
+What is built and what is left is listed under "The scaffold" above. **`Button` (#18)
+is not being pulled forward**, and the reasoning is there too.
 
 ## Slice 2: Chunking
 

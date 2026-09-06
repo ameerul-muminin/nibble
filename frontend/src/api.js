@@ -31,3 +31,48 @@ async function request(path, options) {
 export function getHealth() {
   return request('/health')
 }
+
+/**
+ * Slice 1: every note that has been uploaded, newest first.
+ *
+ * Returns an array of { id, filename, page_count, created_at } — the shape is
+ * written down in docs/api.md under "Slice 1", and that contract is what lets
+ * this file and routes.py be built without waiting for each other.
+ */
+export function listDocuments() {
+  // TODO(Alif): one line. request('/documents') already does the fetch, the
+  //   error handling and the JSON parsing, so this is just returning it.
+  throw new Error('TODO(Alif): listDocuments is not written yet')
+}
+
+/**
+ * Slice 1: upload one file and get the created document back.
+ *
+ * @param {File} file - straight from an <input type="file"> element.
+ */
+// eslint-disable-next-line no-unused-vars -- delete this line once `file` is used
+export function uploadDocument(file) {
+  // TODO(Alif): build a FormData, append the file under the name 'file'
+  //   (that name has to match the parameter in routes.py), then:
+  //     return request('/documents', { method: 'POST', body: form })
+  //
+  // DO NOT set a Content-Type header. It is tempting, because every other
+  // POST you will ever write sets one. The browser has to set this one
+  // itself, because multipart/form-data needs a boundary string that only
+  // the browser knows. Setting it by hand sends a boundary-less header, the
+  // backend cannot split the body, and you get a confusing 422 that looks
+  // like the file is wrong when the file is fine.
+  throw new Error('TODO(Alif): uploadDocument is not written yet')
+}
+
+/**
+ * Slice 1: delete one note by its id.
+ *
+ * The backend answers 204 with no body, and `request` already turns that into
+ * null rather than trying to parse JSON that is not there.
+ */
+// eslint-disable-next-line no-unused-vars -- delete this line once `id` is used
+export function deleteDocument(id) {
+  // TODO(Alif): return request(`/documents/${id}`, { method: 'DELETE' })
+  throw new Error('TODO(Alif): deleteDocument is not written yet')
+}

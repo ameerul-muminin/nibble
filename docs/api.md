@@ -23,7 +23,7 @@ Is the backend awake? The frontend calls this on page load.
 
 ---
 
-## Slice 1 — planned
+## Slice 1 — built, except `DELETE`
 
 ### `GET /documents`
 
@@ -50,6 +50,9 @@ Returns `201` with a single document object, shaped as above.
 Errors: `400` wrong file type · `413` too large.
 
 ### `DELETE /documents/{id}`
+
+**Not built yet — issue #6.** The route exists in `routes.py` as a scaffold with
+the behaviour marked `TODO`, so the contract below is what it must end up doing.
 
 Deletes the document and all of its chunks. Returns `204` with no body.
 
