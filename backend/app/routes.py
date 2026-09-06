@@ -203,18 +203,21 @@ def delete_document(document_id: int):
     """
     db = get_db()
     try:
-        # Check it exists FIRST. In SQL, DELETE on a row that is not there
-        # succeeds quietly and reports no error, so without this check a
-        # request for a missing id would come back 204 instead of 404.
-        row = db.execute("SELECT id FROM documents WHERE id = ?", (document_id,)).fetchone()
-        if row is None:
+        # Delete first, then ask how many rows that actually removed. In SQL a
+        # DELETE against a row that is not there succeeds quietly and reports
+        # no error, so something has to distinguish the two cases — but it must
+        # not be a separate SELECT beforehand. Two requests deleting the same id
+        # would both pass that check, and the loser would delete nothing and
+        # still answer 204. Asking the DELETE itself is one statement, so there
+        # is no gap in between for anything to change.
+        cursor = db.execute("DELETE FROM documents WHERE id = ?", (document_id,))
+        db.commit()
+
+        if cursor.rowcount == 0:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="That note isn't here. It may already have been deleted.",
             )
-
-        db.execute("DELETE FROM documents WHERE id = ?", (document_id,))
-        db.commit()
     finally:
         db.close()
 

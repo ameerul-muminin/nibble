@@ -343,3 +343,26 @@ def test_delete_document_also_deletes_its_chunks(client):
 def test_delete_with_a_non_numeric_id_is_rejected(client):
     """FastAPI converts the path parameter, so /documents/abc never reaches us."""
     assert client.delete("/documents/abc").status_code == 422
+
+
+def test_two_concurrent_deletes_give_one_204_and_one_404(client):
+    """Exactly one caller wins when the same note is deleted twice at once.
+
+    The obvious way to write this route is SELECT to check it exists, then
+    DELETE. Both requests would pass that check, both would call DELETE, and
+    the loser would remove nothing while still answering 204 — reporting a
+    success for something it did not do. Asking the DELETE how many rows it
+    removed closes the gap, because it is a single statement.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    created = client.post(
+        "/documents", files={"file": ("race.txt", b"Delete me once.", "text/plain")}
+    ).json()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        both = [pool.submit(client.delete, f"/documents/{created['id']}") for _ in range(2)]
+        codes = sorted(f.result().status_code for f in both)
+
+    assert codes == [204, 404]
+    assert client.get("/documents").json() == []

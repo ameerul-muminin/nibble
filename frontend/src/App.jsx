@@ -89,10 +89,16 @@ export default function App() {
       // The new note goes at the FRONT, because the backend returns newest
       // first and the screen should agree with it.
       //
-      // This builds a NEW array rather than calling docs.push(). React only
-      // redraws when it sees a different value, and push() changes the old
-      // array in place — the note would be in the list and never appear.
-      setDocs([created, ...docs])
+      // setDocs is given a FUNCTION rather than a value. Written as
+      // setDocs([created, ...docs]), `docs` would be the list as it was when
+      // this upload started — so a delete that finished while the upload was
+      // in flight would be undone, and the deleted note would reappear. The
+      // function form is handed the list as it is right now instead.
+      //
+      // Either way it builds a NEW array rather than calling push(). React
+      // only redraws when it sees a different value, and push() changes the
+      // old array in place, so the note would be in the list and never show.
+      setDocs((current) => [created, ...current])
     } catch {
       // Never show the raw error. A plain sentence, and a way to try again.
       setNotice('That upload did not work. Check it is a PDF, TXT or MD under 20 MB, then try again.')
@@ -107,10 +113,13 @@ export default function App() {
     try {
       await deleteDocument(id)
 
-      // filter returns a new array and leaves the old one alone, which is
-      // exactly what React wants. Same "a new value, not a changed one" idea
-      // as the upload above — worth noticing that it came up twice.
-      setDocs(docs.filter((d) => d.id !== id))
+      // Same function form as the upload, and for the same reason: delete two
+      // notes quickly and the second one would otherwise filter the list as it
+      // was before the first finished, putting the first note back on screen.
+      //
+      // filter returns a new array and leaves the old one alone, which is what
+      // React wants — the same "a new value, not a changed one" idea as above.
+      setDocs((current) => current.filter((d) => d.id !== id))
     } catch {
       setNotice('Could not delete that note. Try again in a moment.')
     }
