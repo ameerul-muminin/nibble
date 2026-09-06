@@ -10,8 +10,9 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { Show, SignInButton, SignUpButton, UserButton } from '@clerk/react'
+import { Show, UserButton } from '@clerk/react'
 import { deleteDocument, getHealth, listDocuments, uploadDocument } from './api'
+import { Landing } from './components/Landing'
 import { Mascot } from './components/Mascot'
 import './styles/global.css'
 
@@ -156,9 +157,16 @@ export default function App() {
     }
   }
 
+  // Signed-out visitors get the Duolingo-style landing page.
+  // Signed-in users skip it and go straight to the app below.
   return (
-    <main style={{ maxWidth: 620, margin: '0 auto', padding: 'var(--gap-xl) var(--gap-lg)' }}>
-      <header
+    <>
+      <Show when="signed-out">
+        <Landing />
+      </Show>
+      <Show when="signed-in">
+        <main style={{ maxWidth: 620, margin: '0 auto', padding: 'var(--gap-xl) var(--gap-lg)' }}>
+          <header
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -174,19 +182,9 @@ export default function App() {
           </p>
         </div>
 
-        {/*
-          Show picks one branch based on whether somebody is signed in. Clerk
-          knows the answer because ClerkProvider wraps the whole app in main.jsx.
-          marginLeft: 'auto' pushes this cluster to the right-hand end of the row.
-        */}
+        {/* Already inside signed-in, so just the user menu. */}
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 'var(--gap-sm)' }}>
-          <Show when="signed-out">
-            <SignInButton mode="modal" />
-            <SignUpButton mode="modal" />
-          </Show>
-          <Show when="signed-in">
-            <UserButton />
-          </Show>
+          <UserButton />
         </div>
       </header>
 
@@ -320,6 +318,8 @@ export default function App() {
           </ul>
         )}
       </section>
-    </main>
+        </main>
+      </Show>
+    </>
   )
 }
