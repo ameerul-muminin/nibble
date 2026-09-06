@@ -175,3 +175,42 @@ def test_get_documents_newest_first(client):
     # The second upload should appear first in the list (newest first)
     assert docs[0]["filename"] == "second.txt"
     assert docs[1]["filename"] == "first.txt"
+
+
+# ---------------------------------------------------------------------------
+# Never trust a filename that came from the client
+# ---------------------------------------------------------------------------
+
+
+def test_upload_with_directory_traversal_filename_stays_in_uploads(client, tmp_path):
+    """A filename like ../../escaped.txt must not write outside uploads/.
+
+    The browser chooses the filename, so an attacker chooses it too. This is the
+    test that proves we strip the directory part instead of trusting it.
+    """
+    response = client.post(
+        "/documents",
+        files={"file": ("../../escaped.txt", b"I should not escape.", "text/plain")},
+    )
+
+    assert response.status_code == 201
+    # Only the last piece of the path survives.
+    assert response.json()["filename"] == "escaped.txt"
+
+    # And nothing was written outside the uploads directory.
+    uploads_dir = tmp_path / "uploads"
+    assert (uploads_dir / "escaped.txt").exists()
+    assert not (tmp_path.parent / "escaped.txt").exists()
+    assert not (tmp_path / "escaped.txt").exists()
+
+
+def test_upload_with_windows_style_traversal_filename(client, tmp_path):
+    """The same thing, written the Windows way with backslashes."""
+    response = client.post(
+        "/documents",
+        files={"file": (r"..\..\escaped-win.txt", b"Nor should I.", "text/plain")},
+    )
+
+    assert response.status_code == 201
+    assert "/" not in response.json()["filename"]
+    assert "\\" not in response.json()["filename"]

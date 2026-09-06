@@ -30,7 +30,7 @@ router = APIRouter()
 _MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 
 # Extensions we allow. Anything else is rejected with a 400.
-_ALLOWED_EXTENSIONS = {".pdf", ".txt", ".md", ".text", ".markdown"}
+_ALLOWED_EXTENSIONS = {".pdf", ".txt", ".md"}
 
 # Where uploaded files are saved on disk.
 _UPLOADS_DIR = Path("uploads")
@@ -59,9 +59,22 @@ async def upload_document(file: UploadFile):
     The route reads the file, validates the extension and size, calls
     extract_text to pull out the words, saves the file to disk, inserts a
     row into the documents table, and returns the new document.
+
+    This is the one ``async def`` route in the project, and the only one that
+    should be. Every other route is a plain ``def`` so there is no async to
+    explain. The exception is here because reading an upload is ``await
+    file.read()`` — FastAPI hands us the file as something you have to await,
+    and there is no sync equivalent. If you write a new route, write ``def``.
     """
+    # --- Work out a filename we can trust ---------------------------------
+    # The browser sends the filename, which means an attacker can send anything
+    # they like. A name like "../../config.py" would walk straight out of the
+    # uploads directory and overwrite a real file. Path(...).name throws away
+    # every directory part and keeps only the last piece, so "../../x.txt"
+    # becomes "x.txt". Never write a path built from a value the client sent.
+    filename = Path(file.filename or "unnamed").name
+
     # --- Validate the extension -------------------------------------------
-    filename = file.filename or "unnamed"
     suffix = Path(filename).suffix.lower()
     if suffix not in _ALLOWED_EXTENSIONS:
         raise HTTPException(
@@ -83,7 +96,7 @@ async def upload_document(file: UploadFile):
 
     # --- Save the file to disk --------------------------------------------
     _UPLOADS_DIR.mkdir(exist_ok=True)
-    (Path(_UPLOADS_DIR) / filename).write_bytes(data)
+    (Path(_UPLOADS_DIR) / filename).write_bytes(data)  # filename is already cleaned above
 
     # --- Insert into the database -----------------------------------------
     created_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S")
