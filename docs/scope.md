@@ -678,6 +678,23 @@ that had just opened.
 
 **72 tests pass**, up from 70.
 
+### The real textbook, chunked
+
+`ch1 DB.pdf` — the 31-page Silberschatz slide deck that fooled the slice 1.5
+verification — was uploaded again after slice 2 was built, and it is the best
+evidence this slice works on something nobody constructed for it:
+
+- **31 pieces, one per page, and all 31 pages are present.**
+- **14,923 characters stored**, which is exactly the text-layer size recorded for
+  this file back in slice 1.5. Nothing was dropped on the way in.
+- **No page needed cutting.** At about 481 characters a page it is comfortably
+  under `CHUNK_SIZE`, so every page is one piece and the overlap never comes into
+  play. Worth knowing before slice 3: a deck like this gives *page-sized* chunks,
+  not 900-character ones.
+- **Page 1 is 138 characters** — a title and copyright slide. Under the rule as
+  first written, that page would have been deleted without a word. It is kept,
+  which is the correction working on real input rather than in a test.
+
 ### Still open on this slice
 
 - [ ] **Nobody has clicked it in a browser.** Lint and the production build are
