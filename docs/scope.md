@@ -123,8 +123,11 @@ loudly**, which is why each got a test that fails against the old code:
 - [x] **`PRAGMA foreign_keys = ON` in `db.py`.** SQLite defaults it OFF, *per
       connection*. Without it `ON DELETE CASCADE` does nothing and says nothing, so
       #6 would have looked correct while leaving orphaned chunks behind.
-- [x] **The `chunks` table, with its `embedding` column and index.** Created in
-      Slice 1 as already decided below, not in Slice 2.
+- [x] **The `chunks` table**, with every column created up front — `embedding`
+      included, TEXT and NULL until Slice 3 fills it — plus a plain index on
+      `document_id`. To be unambiguous, because the wording here first read as though
+      it might have been one: that is **not** an index on the vectors. The ADR rules
+      that out and nothing here changes it.
 - [x] **Extension drift.** `.text` and `.markdown` were accepted by the code and
       absent from `docs/api.md`. The contract won; a test now pins the three.
 - [x] **The one `async def`.** A comment now says why `upload_document` is the
@@ -178,20 +181,39 @@ Upload a PDF, see it in a list, delete it. The contract is written in
 
 ### Decided
 
-**A filename from a client is untrusted input.** Uploads are written with
-`Path(filename).name`, never the raw value, because a name like `../../something`
-otherwise escapes the uploads directory. This is the first place in the project where
-"never trust the client" stops being an abstraction, and it is worth understanding
-rather than pasting.
+**A filename from a client is untrusted input.** Uploads are written through
+`_safe_filename()` in `routes.py`, never the raw value, because a name like
+`../../something` otherwise escapes the uploads directory.
+
+**Do not reach for `Path(filename).name` on its own.** This decision used to say
+exactly that, and it is wrong: `pathlib` follows the rules of the platform it runs on,
+so that line strips a `\` on Windows and leaves it alone on Linux. It looks correct on
+a laptop and lets the dangerous name straight through on a server. `_safe_filename()`
+normalises both separators before taking the last piece, so it answers the same
+everywhere. Corrected 2026-09-06 after CI caught it — see the review record above.
+
+This is the first place in the project where "never trust the client" stops being an
+abstraction, and it is worth understanding rather than pasting.
 
 **`PRAGMA foreign_keys = ON` on every connection.** SQLite has foreign keys **off** by
 default, which means a cascade delete silently does nothing at all. `DELETE
 /documents/{id}` in #6 depends on it, so it lands with `db.py` rather than being
 discovered later as a mystery.
 
-**The schema needs `chunks` from the start, not just `documents`.** Slice 2 stores
-chunks and Slice 3 adds an `embedding` column on them (TEXT, holding JSON). Designing
-the table once, now, is cheaper than migrating a SQLite file later.
+**The schema needs `chunks` from the start, not just `documents`.** Every column is
+**created now, in Slice 1**, including `embedding` (TEXT, holding JSON). Slice 2 starts
+inserting chunk rows and Slice 3 starts filling `embedding` in — it is NULL until then,
+but the column already exists and neither slice alters the table. Designing it once,
+now, is cheaper than migrating a SQLite file later.
+
+This used to read "Slice 3 adds an `embedding` column", which contradicted the sentence
+right after it about not migrating later. Slice 3 *fills* the column; it does not add
+it. Clarified 2026-09-06.
+
+**The only index is on `document_id`**, because every chunk lookup is "the chunks
+belonging to this document". There is deliberately **no index on the vectors** —
+[`adr/0001-sqlite-and-numpy.md`](./adr/0001-sqlite-and-numpy.md) rules that out on
+purpose, and nothing in Slice 1 changes it.
 
 **The allowed extensions and `api.md` must say the same thing.** They drifted once
 already — the code accepted `.text` and `.markdown` while the contract named only
