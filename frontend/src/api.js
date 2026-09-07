@@ -157,3 +157,36 @@ export function search(query) {
     body: JSON.stringify({ query }),
   })
 }
+
+/**
+ * Slice 4: ask a question and get an answer built from your own notes.
+ *
+ * Returns { answer, sources }. Each source is
+ * { document_id, filename, page, excerpt } — the pieces of your notes that were
+ * put in front of the model.
+ *
+ * Two things about the shape are worth knowing before building against it.
+ *
+ * **`sources` is what Nibble read, not what it quoted.** Every page it could
+ * possibly have drawn on is in that list, and nothing else was available to it.
+ * Working out which pages a particular sentence used would mean parsing the
+ * citations back out of the answer, and being wrong there is worse than not
+ * guessing — it would either hide a page that was used or claim one that was
+ * not. Show them as "what it read" and the claim stays true.
+ *
+ * **A refusal is a normal answer, not an error.** When your notes do not cover
+ * the question, `answer` says so and this resolves exactly like any other reply.
+ * That refusal is the most important thing the app does, so it must never be
+ * rendered as a failure — it goes in a bubble like everything else.
+ *
+ * Empty `sources` means nothing was found to answer from at all: no notes yet,
+ * or only notes stored before search existed. The backend does not call the
+ * model in that case, and the answer says what to do about it.
+ */
+export function ask(question) {
+  return request('/ask', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ question }),
+  })
+}

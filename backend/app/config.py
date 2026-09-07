@@ -28,7 +28,38 @@ EMBEDDING_DIM = 384  # this model turns any text into exactly 384 numbers
 # https://console.groq.com/keys and put it in your .env file.
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GROQ_BASE_URL = "https://api.groq.com/openai/v1"
-CHAT_MODEL = "llama-3.3-70b-versatile"
+#
+# This was `llama-3.3-70b-versatile` until slice 4 was actually run against
+# Groq, at which point every question came back as a 404: Groq had retired it.
+# A hosted model is not a decision you make once — the provider can withdraw it
+# and your app breaks without a line of your code changing. `GET /models` on the
+# same key lists what is really there, and that is the thing to check first when
+# answering suddenly stops working.
+CHAT_MODEL = "openai/gpt-oss-120b"
+
+# How hard the model thinks before it answers.
+#
+# It lives next to CHAT_MODEL because it belongs to it: this setting only means
+# anything to a model that reasons, and the two have to be changed together.
+#
+# "low" was chosen by running both. On the same questions, "medium" produced
+# answers no better and spent two to four times the tokens getting there — and
+# on a free tier shared with reading handwriting, tokens are the budget. It is
+# not zero, because deciding "is this actually in the notes?" is the one piece
+# of thinking this project genuinely wants the model to do.
+ANSWER_REASONING_EFFORT = "low"
+
+# How long an answer is allowed to be.
+#
+# A ceiling, not a target — most answers come back far shorter, because the
+# prompt asks for brief ones. It is here for the case where the model decides to
+# write an essay: that turns a five-second wait into a thirty-second one, and
+# spends a free-tier allowance this project shares with reading handwriting.
+#
+# 700 tokens is roughly 500 words, which is a long answer to a study question
+# and a short one to anything else. Raise it if answers start getting cut off
+# mid-sentence; that is the symptom to watch for.
+ANSWER_MAX_OUTPUT_TOKENS = 700
 
 # --- Reading handwriting and scans (slice 1.5) ---------------------------
 # A scanned or handwritten PDF has no text in it to pull out — it is a picture
