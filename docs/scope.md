@@ -62,8 +62,8 @@ already closed.
 | 1.5 | Handwriting and scans | — (unplanned)             | done, merged            |
 | 2   | Chunking              | Slice 2 — Chunking        | done, merged            |
 | 3   | Search, no AI yet     | Slice 3 — Search          | done, merged            |
-| 4   | Nibble answers        | Slice 4 — Nibble answers  | built, in review        |
-| 5   | Make it Nibble        | Slice 5 — Make it Nibble  | open                    |
+| 4   | Nibble answers        | Slice 4 — Nibble answers  | done, merged            |
+| 5   | Make it Nibble        | Slice 5 — Make it Nibble  | in progress             |
 | 6   | Quiz mode (stretch)   | Slice 6 — Quiz mode       | open                    |
 
 **The demo is safe from the end of Slice 4.** Slices 5 and 6 are polish that can be
@@ -75,10 +75,13 @@ magic, and it's a working demo on its own even if everything after it fails.
 
 ## Current state, 2026-09-07
 
-`main` is at `4458c72` and **Slices 0, 1, 1.5, 2 and 3 are all merged.** #33
+`main` is at `b3219a4` and **Slices 0, 1, 1.5, 2, 3 and 4 are all merged.** #33
 (chunking), #35 (the slice 2 handover and the open-backend decision), #34 (the
-landing page), #36 (`embeddings.py`) and #37 (the rest of search) all landed
-within a day, and **#11, #12, #13 and #14 are closed.**
+landing page), #36 (`embeddings.py`), #37 (the rest of search) and #40 (the whole
+of slice 4) all landed within two days, and **#11 through #17 are closed.**
+
+**Slice 5 is the current slice**, and it is the first one that is polish rather
+than plumbing. The four issues in it are #18, #19, #20 and #21.
 
 **The demo now exists.** Upload a chapter, ask a question in your own words, and
 the right paragraph comes back with the page it is on and how well it matched —
@@ -86,10 +89,16 @@ and no language model is involved anywhere in that path. That was the point of
 slice 3 being called the pivotal one, and it holds: if everything after this
 failed, there would still be something worth showing.
 
-**Slice 4 is built and waiting on review.** #15, #16 and #17 are still open on
-GitHub, and GitHub wins on status — they close when the PR merges. The full
+**Slice 4 merged as PR #40**, and #15, #16 and #17 closed with it. The full
 record is under Slice 4: what was built, the chat model Groq retired underneath
-us mid-slice, and why PR #39 was not merged.
+us mid-slice, the sign-out state leak review caught, and why PR #39 was not
+merged.
+
+**One thing merged unverified, and it is still unverified.** Nobody has opened
+slice 4 in a browser. The API is proven end to end against real Groq calls and
+the chat UI is proven by lint and build, which is not the same claim. The two
+checks a person still owes are listed under Slice 4 — they did not stop the merge
+and they have not stopped being owed.
 
 **The demo is now complete.** Upload a chapter, ask a question in your own words,
 and get an answer built from your own pages with the pages it read underneath it
@@ -110,9 +119,13 @@ refusing when they do not cover it.
 
 ### The board now agrees with the code
 
-**22 issues, 6 closed** — #2, #3, #4, #5, #6 and #7. They were built and merged
-weeks apart from being closed, and for a while this file said so while the board
-did not. That gap is shut.
+**22 issues, 16 closed.** It started as 22 with 6 closed — #2 through #7 — which
+were built and merged weeks apart from being closed, and for a while this file
+said so while the board did not. That gap is shut and has stayed shut: every
+slice since has closed its issues on the merge that finished it.
+
+**The six still open are the whole of slices 5 and 6** — #18, #19, #20 and #21,
+then #22 and #23. Nothing before slice 5 is outstanding on the board.
 
 The rule that produced the fix is worth keeping: an issue is done when it is
 closed, not when a box here is ticked. Saying the two disagreed out loud, rather
@@ -1196,6 +1209,13 @@ temptation is to fold it in once there is a chat on the page. Keeping it is what
 makes the answer above it believable: you can watch the retrieval happen with no
 model anywhere near it, then watch the same pieces come back as a sentence.
 
+### Built and merged, 2026-09-07 — PR #40
+
+**PR #40 squash-merged to `main` as `b3219a4`, and #15, #16 and #17 closed with
+it.** Slice 4 is done and the milestone is empty. Two checks a person owes are
+still owed and are listed below — they are recorded as open rather than being
+quietly dropped at the merge.
+
 ### Built, 2026-09-07
 
 - [x] #15 `llm.py` — `SYSTEM_PROMPT`, `build_context()`, `answer()`, and an
@@ -1309,15 +1329,27 @@ component that no longer exists and React drops it.
 
 - [ ] **Not yet verified in a browser.** Lint and build pass. Actually signing
       out and back in as a second Clerk account, in one tab, is a person's job.
+      It is the second item under "Still needing a person" below — the same
+      check, not a second one.
 
 ### Still needing a person
 
+These two outlived the merge. Slice 5 rebuilds most of this screen, so whoever
+picks up #19 will be looking straight at both — do them then rather than treating
+them as slice 4 leftovers nobody owns.
+
 - [ ] **Nobody has opened this in a browser yet.** The API is verified end to end
       with real Groq calls; the chat UI is verified only by lint and build.
-- [ ] **The board.** #15, #16 and #17 close when this merges.
-- [ ] **Who built it.** This is the second slice in a row where the work did not
+- [ ] **Signing out and back in as a second Clerk account, in one tab.** The
+      `key={userId}` fix above is verified by lint and build and by reasoning
+      about how React treats a changed `key`. That is not the same as watching
+      the previous person's questions disappear.
+
+- [x] **The board.** #15, #16 and #17 closed when PR #40 merged.
+- [x] **Who built it.** This was the second slice in a row where the work did not
       go to the people it was assigned to — #16 was Fahim's and #17 was Arman's.
-      See below; it is a decision, not an oversight.
+      Recorded rather than fixed; it is a decision with a cost, and slice 5 is
+      where that cost gets paid or not.
 
 ### PR #39 was not merged, and why
 
@@ -1355,10 +1387,121 @@ rewrite with extra steps.
 Design system, mascot, voice. Everything here is already decided in
 [`design.md`](./design.md) — read it rather than inventing styling.
 
-- [ ] #18 The `Button` component with the solid-edge press _(Arman)_
-- [ ] #19 Nibble's moods, empty states and loading states _(Arman)_
-- [ ] #20 Accessibility pass _(Arman)_
-- [ ] #21 Rewrite every message in Nibble's voice _(Alif)_
+### Decided, 2026-09-08, before building
+
+**This is not a restyle, and assuming it is would be the expensive mistake.** The
+design system already exists and is already used: `tokens.css` holds every colour,
+radius and shadow, `global.css` holds `.btn`, `.card`, `.input`, `.bubble`,
+`.source-chip` and `.streak`, and `Landing.jsx` uses all of it correctly.
+`App.jsx` largely does too — its inline styles are flex layout built from tokens,
+not raw values, so there is no token rule being broken there and nothing to
+extract for its own sake. Ripping 1,029 lines of working page apart to move
+`display: flex` into a stylesheet would be a 2,000-line pull request that buys
+nothing anybody can see.
+
+So slice 5 is four narrow things, in files that mostly already look right.
+
+**`Mascot.jsx` is imported by nothing.** That is the finding that made this slice
+concrete. It was written in the rebuild, it takes a `mood` prop, it has a bob
+animation — and no file anywhere imports it. `Landing.jsx` draws Nibble with a
+flat `<img src="/wave-nibble.svg">` instead, and the signed-in app draws no cat at
+all. Nibble is currently a cat-branded product with no cat in it, which is exactly
+the hole #19 exists to fill.
+
+**Four things are broken in a way that only shows up when you look at the CSS**,
+and they go first because every other pull request in this slice touches those
+lines:
+
+- `'2px solid var(--border, #eee)'`, in two places, expands to
+  `2px solid 3px solid var(--ink)`. That is not valid CSS, so the browser throws
+  the whole declaration away: **the note rows and the chunk boxes have no border
+  at all right now.** The fallback never fires — `--border` _is_ defined, as a
+  whole shorthand rather than a colour, so the fallback was never the problem.
+- `var(--danger, #b3261e)`, in two places. `--danger` is not a token and never has
+  been, so this always renders the raw hex — a red that is in no palette,
+  appearing on a page whose errors are supposed to be `--coral`.
+
+Both are precisely what `design.md`'s "never type a raw hex code in a component"
+rule exists to prevent, and both are invisible until somebody reads the file.
+
+### Who is building it, and the cost, stated accurately
+
+**Alif is building all four**, the same as slices 3 and 4.
+
+The first version of this note said the cost was "three slices in a row where
+Arman ships nothing he can explain at the demo". **That was wrong, and it is worth
+recording that it was wrong rather than quietly deleting it.** Arman authored PR
+#34 — `Landing.jsx` and `landing.css`, the entire signed-out front door. He has
+already built against `design.md`, using its tokens and its components correctly,
+and it is the most finished-looking screen in the app. He has a change to explain.
+
+So the honest cost is narrower: slice 5 is the slice most suited to somebody
+learning the frontend — visual, checkable in a browser, no threading and no
+network failure modes — and it is being handed to the person who needs it least.
+That is a real cost and it is being accepted with eyes open, not overlooked.
+
+### Checklist
+
+- [ ] **`fix/borders-and-danger-token`** — the four broken lines above. Its own
+      pull request, first, because "these borders do not render" is its own claim
+      and deserves its own review rather than being buried in a restyle.
+- [ ] **#18 `Button.jsx`** — `variant` of `primary` / `secondary` / `accent`, plus
+      a `plain` variant for the note-row filename toggle, which has to stay a real
+      `<button>` for the keyboard while not looking like one. Replaces every raw
+      `<button>` in `App.jsx` and `Landing.jsx`.
+- [ ] **#19 Nibble's moods, empty states and loading states** — `happy` and
+      `curious` on `Mascot`, then Nibble in the header, in both empty states,
+      thinking while an answer is in flight, and happy beside the newest answer.
+- [ ] **#20 Accessibility pass** — the gaps that are actually left, listed below.
+- [ ] **#21 Nibble's voice** — every user-visible string, frontend and backend.
+
+### The trap in #18, written down before somebody falls into it
+
+`Landing.jsx` wraps its buttons in Clerk's `<SignInButton mode="modal">`. That
+component does not render a button of its own — it **clones the child it is given
+and attaches its own `onClick`**. A `Button` component that names only the props
+it cares about, and drops the rest, therefore throws that `onClick` on the floor,
+and sign-in stops working with no error anywhere: the button still draws, still
+presses, still animates, and does nothing.
+
+So `Button` spreads its remaining props onto the real element. That is the reason
+a component takes props it does not name, and it is a better example of why than
+any explanation in the abstract.
+
+### What #20 actually has left
+
+Most of the accessibility floor is already standing, built in as each slice went
+by rather than bolted on here: real `<label>`s that are visually hidden rather
+than absent, `role="status"` on both the search and the answer, `aria-label` on
+the icon-only delete, `aria-expanded` on the note toggle, a `:focus-visible` ring
+in `global.css`, and `prefers-reduced-motion` honoured. A real button was used
+everywhere a `<div onClick>` would have been easier.
+
+That is the point worth making at the demo — the pass is short _because_ the floor
+was built from the start. What is left:
+
+- **Coral error text carries its meaning by colour alone.** `design.md` forbids
+  exactly that. It needs a word or an icon beside it.
+- **`.btn:disabled` is `opacity: 0.45`.** Ink on lime at 45% is almost certainly
+  under 4.5:1, and the Ask button spends every slow answer in that state.
+- **`Mascot` has a hardcoded `aria-label="Nibble the cat"`.** That becomes a lie
+  the moment it has moods, and in most of the places #19 puts it the text beside
+  it already says the thing — so it is decorative there and should be hidden from
+  a screen reader rather than announced twice.
+- **The keyboard run-through needs a person.** Unplug the mouse; upload, search,
+  ask and delete. Nothing here can assert that.
+
+### The two strings in #21 that are not really wording
+
+- **The "Slice 0 — is everything talking?" card.** A developer's debug panel,
+  sitting at the top of the product, above the thing the product is for. It says
+  "Next up: Slice 1, uploading a PDF" to a person who is looking at four finished
+  slices. The health check behind it is worth keeping; the card is not.
+- **The backend's `detail` sentences.** `docs/api.md` promises they are written
+  for a person and shown verbatim, so the voice pass has to cross into the
+  backend to finish. **`routes.py` is Fahim's file** — #21 assigns this rewrite to
+  Alif, so the crossing is sanctioned by the issue rather than taken, but it gets
+  named in the pull request rather than passing silently.
 
 ## Slice 6: Quiz mode
 
