@@ -105,7 +105,14 @@ The key is free and does not ask for a card: <https://console.groq.com/keys>
 pytest -q
 ```
 
-Two passing tests.
+Every test should pass.
+
+**The first run stops for a minute and looks stuck. It is not.** Search needs a
+model that turns text into numbers, it runs on your own laptop rather than
+somebody's server, and it is downloaded the first time a test asks for it — about
+**65 MB**, once. After that it is on your disk and works with no internet at all.
+Nothing else in the setup downloads anything at this point, so if `pytest` sits
+there quietly early on, that is what it is doing.
 
 ---
 
