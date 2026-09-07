@@ -857,7 +857,7 @@ line: the exception ends where somebody else's issue begins.
 - [x] `docs/api.md` — the Slice 3 errors, the clamp, and `unsearchable_notes`,
       written **before** #12 and #13 start, which is what the contract rule is for
 - [x] The fastembed model cached in CI, so only the first run pays for the download
-- [x] A  around the model build, after review found two threads
+- [x] A `threading.Lock` around the model build, after review found two threads
       could both build one — see the review note below
 
 ### Reviewed, 2026-09-07 — one fixed, one declined
