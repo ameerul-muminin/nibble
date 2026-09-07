@@ -87,6 +87,49 @@ def test_the_model_is_loaded_once_and_reused():
     assert get_model() is get_model()
 
 
+def test_two_threads_asking_at_once_still_build_only_one_model(monkeypatch):
+    """The singleton rule again, this time under the conditions it actually meets.
+
+    Our routes are plain `def`, so FastAPI runs them in a pool of threads and two
+    requests genuinely can be inside get_model() at the same moment — two people
+    uploading at once is enough. Without the lock, both see None and both build a
+    model.
+
+    This uses a fake model rather than the real one, because the point being
+    tested is the locking and not the maths, and because the fake can be made
+    deliberately slow. The sleep is what makes the test meaningful: it holds the
+    first thread inside the constructor long enough for the others to arrive, so
+    an unlocked version fails this reliably rather than once in a hundred runs.
+    """
+    import threading
+    import time
+
+    import app.embeddings as embeddings
+
+    builds = []
+
+    class SlowFakeModel:
+        def __init__(self, model_name=None):
+            time.sleep(0.05)
+            builds.append(model_name)
+
+    monkeypatch.setattr(embeddings, "TextEmbedding", SlowFakeModel)
+    monkeypatch.setattr(embeddings, "_model", None)
+
+    models = []
+    threads = [
+        threading.Thread(target=lambda: models.append(embeddings.get_model())) for _ in range(8)
+    ]
+
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert len(builds) == 1, f"the model was built {len(builds)} times, not once"
+    assert all(model is models[0] for model in models)
+
+
 # ---------------------------------------------------------------------------
 # The maths, with no model involved
 # ---------------------------------------------------------------------------

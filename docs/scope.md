@@ -857,6 +857,48 @@ line: the exception ends where somebody else's issue begins.
 - [x] `docs/api.md` — the Slice 3 errors, the clamp, and `unsearchable_notes`,
       written **before** #12 and #13 start, which is what the contract rule is for
 - [x] The fastembed model cached in CI, so only the first run pays for the download
+- [x] A  around the model build, after review found two threads
+      could both build one — see the review note below
+
+### Reviewed, 2026-09-07 — one fixed, one declined
+
+**"Two threads can both build the model." Valid, and fixed.** `get_model()` checked
+`_model is None` and built one with nothing stopping a second thread doing the same.
+It is reachable, not theoretical: our routes are plain `def`, so FastAPI runs them in
+a **pool of threads**, and two people uploading at once is enough. Both would see
+None, both would build — double the memory and the wait, and on a first run, two
+threads writing into the same download directory. The second model then replaces the
+first and nothing looks wrong, which is the worst shape a problem can have.
+
+This is the reason [`team.md`](./team.md) puts the engine modules with the tech lead
+in the first place: *"non-obvious failure modes (threading, model loading, network
+errors)"*. That sentence predicted this exact bug.
+
+Fixed with a `threading.Lock` taken on **every** call, not the "check first, then
+lock" version. That is double-checked locking; it saves nanoseconds, it is fiddly to
+get right, and the work waiting behind this lock is embedding text, which takes
+millions of times longer. Obvious beats clever here.
+
+**The test was checked against the broken code before being trusted.** Eight threads,
+a deliberately slow fake model, and an assertion that the constructor ran once. With
+the lock removed it reports "the model was built 8 times, not once". A concurrency
+test that has never been seen to fail is not evidence of anything. **84 tests pass.**
+
+**"Pin `actions/cache@v4` to a commit SHA." Real mechanism, declined here.** A moving
+tag can be repointed, and an action in CI can do anything the job can. Not fixed, for
+two reasons.
+
+It would be the only pinned action of five — `checkout@v7`, `setup-python@v7` and
+`setup-node@v7` are all mutable tags, and `checkout` runs *first*, in the same job,
+with the same permissions. Pinning the cache step while leaving those alone does not
+close the hole; it just makes one line look safer than it is. And this workflow holds
+no secrets: `GROQ_API_KEY` is never given to CI, so the realistic worst case is a lie
+about whether the tests passed, which a human review of the diff still catches.
+
+The honest fix is all five or none, and all five means five 40-character SHAs that
+nobody on this team can read and nobody will remember to bump. **If this project is
+ever deployed, or CI is ever given a secret, pin them all — that is when this becomes
+the wrong call.** Recorded here rather than argued in a PR thread that closes.
 
 **A float32 lesson, from a test that failed.** `cosine_similarity([1,2,3], [[1,2,3]])`
 does not return 1.0. It returns 0.99999994, because dividing by a length and

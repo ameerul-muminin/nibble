@@ -28,6 +28,8 @@ at all; that is why this one part of the project does not go through the same
 provider, and it is not an oversight.
 """
 
+import threading
+
 import numpy as np
 from fastembed import TextEmbedding
 
@@ -46,6 +48,21 @@ from app import config
 # trade. The first search after a restart is slow; every one after it is not.
 _model: TextEmbedding | None = None
 
+# Only one thread may build the model, and this is what enforces it.
+#
+# It is needed because our routes are plain `def`, not `async def`. FastAPI runs
+# those in a pool of threads so a slow one cannot block the whole server, which
+# is exactly what we want — and it means two requests really can be inside this
+# module at the same moment. Two people uploading at once on demo day is enough.
+#
+# Without the lock both would see `_model` as None and both would build one:
+# twice the memory, twice the wait, and on a machine that has never run this
+# before, two threads writing into the same download directory at the same time.
+# The second model then quietly replaces the first, so nothing looks wrong — it
+# is just slower and heavier than it should be, which is the hardest kind of
+# problem to notice.
+_model_lock = threading.Lock()
+
 
 class EmbeddingUnavailable(RuntimeError):
     """The model could not be loaded — no download on the first run, usually.
@@ -63,17 +80,26 @@ def get_model() -> TextEmbedding:
     Everything in here goes through this function rather than touching ``_model``
     directly, so there is exactly one place where loading can happen and exactly
     one place that can fail.
+
+    The lock is taken on **every** call, not only when the model is missing. You
+    will see the other version of this written as "check if it is None, and only
+    then take the lock" — that is called double-checked locking, it saves a few
+    billionths of a second, and it is fiddly to get right for no benefit we can
+    measure. Taking the lock every time is obviously correct at a glance, and the
+    work waiting behind it is embedding text, which takes millions of times
+    longer than the lock does.
     """
     global _model
 
-    if _model is None:
-        try:
-            _model = TextEmbedding(model_name=config.EMBEDDING_MODEL)
-        except Exception as exc:  # every way this fails means the same thing to a person
-            raise EmbeddingUnavailable(
-                "The search model could not be loaded. The first run downloads "
-                "about 65 MB, so check you are online and try again."
-            ) from exc
+    with _model_lock:
+        if _model is None:
+            try:
+                _model = TextEmbedding(model_name=config.EMBEDDING_MODEL)
+            except Exception as exc:  # every way this fails means the same thing to a person
+                raise EmbeddingUnavailable(
+                    "The search model could not be loaded. The first run downloads "
+                    "about 65 MB, so check you are online and try again."
+                ) from exc
 
     return _model
 
