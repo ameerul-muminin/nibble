@@ -11,7 +11,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useAuth, UserButton } from '@clerk/react'
-import { deleteDocument, getChunks, getHealth, listDocuments, search, uploadDocument } from './api'
+import { ask, deleteDocument, getChunks, getHealth, listDocuments, search, uploadDocument } from './api'
 import { Landing } from './components/Landing'
 import './styles/global.css'
 
@@ -22,7 +22,40 @@ const MESSAGES = {
   down: 'Can’t reach the backend. Open a second terminal, go to the backend folder, and run: uvicorn app.main:app --reload',
 }
 
+/**
+ * Everything below belongs to whoever is signed in right now, and nothing of it
+ * survives them signing out.
+ *
+ * This wrapper is four lines and it exists for a bug that is easy to write and
+ * hard to spot. `Nibble` returns <Landing /> when nobody is signed in — but a
+ * `return` is not the component going away. React keeps it mounted in the same
+ * place in the tree, so every useState inside it keeps its value. Sign out, sign
+ * in as somebody else in the same tab, and the previous person's conversation is
+ * still on screen: their questions, the answers, and the text they searched for.
+ *
+ * `key` is how you say "this is a different one now". React uses it to decide
+ * whether the thing at this position is the same thing it drew last time, and
+ * when it changes React throws the old one away and builds a new one — with
+ * every piece of state fresh. It is the same idea as key={doc.id} on the rows of
+ * the notes list, used deliberately rather than incidentally.
+ *
+ * Doing it here rather than clearing each piece of state by hand is the same
+ * reasoning as ON DELETE CASCADE in db.py: a list of things to reset is a list
+ * somebody has to remember to add to, and the day it gets forgotten it fails
+ * silently. This cannot be forgotten. Every state added from here on is covered
+ * by it for free, including an answer still in flight when the user changes —
+ * that arrives to a component that no longer exists, and React drops it.
+ */
 export default function App() {
+  const { userId } = useAuth()
+
+  // ?? 'signed-out' because userId is null when nobody is signed in and
+  // undefined while Clerk is still looking. A key of null or undefined is the
+  // same as no key at all, which would leave the state exactly where it was.
+  return <Nibble key={userId ?? 'signed-out'} />
+}
+
+function Nibble() {
   // Who is looking at this? isLoaded is false for the first moment, while Clerk
   // checks the browser for an existing session. Both flags matter: <Show> was
   // used here before and it renders NOTHING while loading, which is invisible
@@ -295,6 +328,78 @@ export default function App() {
     return `${Math.round(score * 100)}%`
   }
 
+  // -------------------------------------------------------------------------
+  // Slice 4 — issue #17. Ask a question, get an answer with the pages it read.
+  // -------------------------------------------------------------------------
+
+  // The whole conversation, oldest first. Each turn is
+  // { role: 'user' | 'nibble', content: string, sources: [] }.
+  //
+  // One array rather than a question state and an answer state, because a chat
+  // is a list that grows and never shrinks. Two separate states could only ever
+  // hold the latest pair, and the second question would erase the first answer.
+  const [turns, setTurns] = useState([])
+
+  const [question, setQuestion] = useState('')
+  const [askStatus, setAskStatus] = useState('idle') // idle | asking | failed
+  const [askError, setAskError] = useState(null)
+
+  /**
+   * #17 — runs when the question form is submitted.
+   *
+   * Two appends, at two different moments, and that is the whole shape of a
+   * chat: the question goes up the instant it is asked, and the answer joins it
+   * whenever it arrives. Waiting for the answer before showing either would
+   * leave the box empty for several seconds after somebody pressed Enter, which
+   * reads as the app having ignored them.
+   */
+  async function handleAsk(event) {
+    event.preventDefault()
+
+    const trimmed = question.trim()
+    if (!trimmed) return
+
+    // setTurns is given a FUNCTION rather than a value, the same as setDocs on
+    // the upload above and for the same reason: `turns` inside this handler is
+    // the list as it was when the handler started, so building a new array from
+    // it would undo anything that landed in between. The function form is
+    // handed the list as it is right now.
+    setTurns((current) => [...current, { role: 'user', content: trimmed, sources: [] }])
+
+    // Clear the box straight away. The question is on screen in a bubble now,
+    // so leaving it in the input as well says it has not been sent yet.
+    setQuestion('')
+    setAskStatus('asking')
+    setAskError(null)
+
+    try {
+      const body = await ask(trimmed)
+
+      // A refusal arrives here, not in the catch. "That isn't in your notes
+      // yet." is Nibble working correctly, and it goes in a bubble like any
+      // other answer — rendering it as an error would be exactly backwards.
+      setTurns((current) => [
+        ...current,
+        { role: 'nibble', content: body.answer, sources: body.sources ?? [] },
+      ])
+      setAskStatus('idle')
+    } catch (error) {
+      // The failed question stays on screen rather than being taken back. It is
+      // still what was asked, and removing it would leave somebody staring at
+      // an error with no idea which question caused it.
+      setAskError(
+        error.message || 'Nibble could not answer just now. Try again in a moment.',
+      )
+      setAskStatus('failed')
+    }
+
+    // No stale-answer guard here, unlike handleSearch. The Ask button and the
+    // box are both disabled while an answer is in flight, so a second question
+    // cannot be sent until the first has landed — and in a transcript an answer
+    // has to go in one particular place, which makes silently dropping one
+    // worse than never having two.
+  }
+
   /** #5 — runs when a file has been chosen in the hidden input. */
   async function handleFileChosen(event) {
     const file = event.target.files[0]
@@ -431,12 +536,132 @@ export default function App() {
       </section>
 
       {/*
+        Slice 4 — issue #17. The actual product.
+
+        First on the page, above search, because this is what Nibble is for.
+        Search stays below it rather than being folded in: being able to see the
+        retrieval on its own, with no model near it, is what makes the answer up
+        here believable rather than magic.
+      */}
+      <section className="card" style={{ marginTop: 'var(--gap-lg)' }}>
+        <h2 style={{ marginBottom: 'var(--gap-sm)' }}>Ask Nibble</h2>
+
+        <p style={{ marginTop: 0, color: 'var(--text-muted)' }}>
+          Nibble answers from your notes and nothing else, and shows you the pages it
+          read. Ask it something they don’t cover and it will say so.
+        </p>
+
+        {/*
+          The transcript. An empty state rather than a blank space, because this
+          is the first thing anybody sees when they open Nibble.
+        */}
+        {turns.length === 0 && askStatus === 'idle' && (
+          <p style={{ color: 'var(--text-muted)' }}>
+            Nothing asked yet. Try “explain this chapter in three sentences”.
+          </p>
+        )}
+
+        {turns.length > 0 && (
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 'var(--gap)',
+              marginBottom: 'var(--gap)',
+            }}
+          >
+            {turns.map((turn, index) => (
+              <div
+                /*
+                  The index as the key, which is normally the wrong answer —
+                  and is the right one here for a reason worth knowing. An
+                  index breaks when a list is reordered or has things removed
+                  from the middle, because React then matches up the wrong
+                  rows. A transcript does neither: turns are only ever appended
+                  to the end, so turn 3 is turn 3 forever. Nothing else here is
+                  unique — the same question asked twice is genuinely the same
+                  string.
+                */
+                key={index}
+                className={`bubble ${turn.role === 'user' ? 'bubble--user' : 'bubble--cat'}`}
+              >
+                {turn.content}
+
+                {/*
+                  The pages Nibble was allowed to read. This is the part that
+                  makes an answer checkable rather than something to take on
+                  faith — and checking is the point, because the honest claim
+                  is "it only had these pages", not "it quoted this one".
+
+                  These are left alone when a note is deleted, unlike the search
+                  results. A transcript is a record of what was said at the
+                  time, and quietly editing the sources out of an answer already
+                  given would make it look like Nibble had read something else.
+                */}
+                {turn.sources.length > 0 && (
+                  <div className="sources">
+                    {turn.sources.map((source) => (
+                      <span
+                        key={`${source.document_id}-${source.page}-${source.excerpt.slice(0, 24)}`}
+                        className="source-chip"
+                        title={source.excerpt}
+                      >
+                        {source.filename} · p. {source.page}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <form onSubmit={handleAsk} style={{ display: 'flex', gap: 'var(--gap-sm)' }}>
+          {/* A real label, hidden from sight but not from a screen reader. */}
+          <label htmlFor="ask-box" className="visually-hidden">
+            What do you want to ask Nibble?
+          </label>
+
+          <input
+            id="ask-box"
+            className="input"
+            type="text"
+            placeholder="Explain osmosis simply"
+            value={question}
+            onChange={(event) => setQuestion(event.target.value)}
+            disabled={askStatus === 'asking'}
+          />
+
+          <button
+            type="submit"
+            className="btn btn--primary"
+            disabled={askStatus === 'asking' || !question.trim()}
+          >
+            {askStatus === 'asking' ? 'Thinking…' : 'Ask'}
+          </button>
+        </form>
+
+        {/* Announced to a screen reader when it changes, without stealing focus. */}
+        <div role="status">
+          {askStatus === 'asking' && (
+            <p style={{ color: 'var(--text-muted)', marginBottom: 0 }}>
+              Reading your notes…
+            </p>
+          )}
+
+          {askStatus === 'failed' && (
+            <p style={{ color: 'var(--coral)', marginBottom: 0 }}>{askError}</p>
+          )}
+        </div>
+      </section>
+
+      {/*
         Slice 3 — issue #14. Search, with no AI anywhere in it.
 
-        Sits directly above the notes list, because that is what it searches.
-        Everything on screen here comes from cosine similarity and nothing else:
-        no model wrote a word of it, which is exactly what makes this slice worth
-        demoing on its own.
+        Sits between the chat and the notes list. Everything on screen here comes
+        from cosine similarity and nothing else: no model wrote a word of it,
+        which is exactly what makes this slice worth demoing on its own — and
+        what shows where the answer above actually came from.
       */}
       <section className="card" style={{ marginTop: 'var(--gap-lg)' }}>
         <h2 style={{ marginBottom: 'var(--gap-sm)' }}>Search your notes</h2>

@@ -211,7 +211,7 @@ the list as something no search can ever find.
 
 ---
 
-## Slice 4 — planned
+## Slice 4 — built
 
 ### `POST /ask`
 
@@ -241,6 +241,31 @@ Response:
 
 `sources` is empty when nothing relevant was found — and the answer says so
 rather than guessing.
+
+**`sources` is what Nibble read, not what it quoted.** It is the same pieces
+`POST /search` would return for that question, capped at the same `TOP_K`, and
+they are the only thing the model was shown. Working out which pages a given
+sentence actually used would mean parsing the citations back out of the answer,
+and being wrong there is worse than not guessing: it would either hide a page
+that was used or claim one that was not. Show these as the pages it read.
+
+`excerpt` is the first 200 characters of the piece, with `…` on the end if it
+was cut. It is there to point at a page, not to reprint it.
+
+**A refusal is a normal `200`.** When the notes do not cover the question the
+answer says so — "That isn't in your notes yet." — and `sources` still lists what
+was read, because seeing what it had is how somebody understands why it could
+not answer. Never render that as an error.
+
+When there is nothing to answer from at all — no notes uploaded, or only notes
+stored before search existed — the answer says so, `sources` is `[]`, and **the
+model is not called at all.**
+
+| Status | When |
+| --- | --- |
+| `200` | An answer, a refusal, or "nothing in your notes about that yet" |
+| `400` | The question is empty, or only whitespace |
+| `503` | The embedding model could not be loaded, or the answering service could not be reached |
 
 ---
 

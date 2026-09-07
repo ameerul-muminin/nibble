@@ -1,0 +1,282 @@
+"""Tests for POST /ask — the endpoint the whole project exists for.
+
+Two fakes, both deliberate, and for different reasons.
+
+**The embedder is fake** for exactly the reason test_search.py gives: the claim
+here is about plumbing, not about meaning, and a three-number vector makes the
+scores exact instead of approximate.
+
+**The model is fake** because the alternative is a network call to Groq on every
+test run — slow, needing a key CI does not have, and testing Groq rather than
+testing us. What this file checks is the route's own decisions: when it calls the
+model, when it refuses to, what it puts in `sources`, and what a person sees when
+something goes wrong.
+
+Whether the model actually obeys the prompt is checked by hand, not here. See
+the note at the top of test_llm.py.
+"""
+
+import pytest
+from fastapi.testclient import TestClient
+
+from app import llm
+from app.embeddings import EmbeddingUnavailable
+
+# The same three directions test_search.py uses: osmosis, databases, neither.
+_OSMOSIS = [1.0, 0.0, 0.0]
+_DATABASE = [0.0, 1.0, 0.0]
+_NEITHER = [0.0, 0.0, 1.0]
+
+
+def _fake_embed(texts: list[str]) -> list[list[float]]:
+    vectors = []
+    for text in texts:
+        lowered = text.lower()
+        if "osmosis" in lowered:
+            vectors.append(_OSMOSIS)
+        elif "database" in lowered:
+            vectors.append(_DATABASE)
+        else:
+            vectors.append(_NEITHER)
+    return vectors
+
+
+@pytest.fixture(autouse=True)
+def _use_temp_db(tmp_path, monkeypatch):
+    """A fresh database and uploads directory for every test."""
+    monkeypatch.setattr("app.config.DATABASE_FILE", str(tmp_path / "test_nibble.db"))
+    monkeypatch.setattr("app.routes._UPLOADS_DIR", tmp_path / "uploads")
+
+
+@pytest.fixture(autouse=True)
+def _fake_model(monkeypatch):
+    monkeypatch.setattr("app.routes.embed_texts", _fake_embed)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_groq(monkeypatch):
+    """Nothing in this file may reach the network. Fail loudly if it tries."""
+
+    def explode(*args, **kwargs):
+        raise AssertionError("a test called Groq for real")
+
+    monkeypatch.setattr(llm.requests, "post", explode)
+
+
+@pytest.fixture()
+def asked(monkeypatch):
+    """Swap llm.answer for a fake, and record what the route handed it."""
+    calls = []
+
+    def fake_answer(question, context):
+        calls.append({"question": question, "context": context})
+        return "Water moves across the membrane (p. 1)."
+
+    monkeypatch.setattr("app.routes.llm.answer", fake_answer)
+    return calls
+
+
+@pytest.fixture()
+def client():
+    from app.main import app
+
+    return TestClient(app)
+
+
+def _upload(client, filename: str, text: str):
+    return client.post("/documents", files={"file": (filename, text.encode(), "text/plain")})
+
+
+# ---------------------------------------------------------------------------
+# The question itself
+# ---------------------------------------------------------------------------
+
+
+def test_a_blank_question_is_400_with_a_sentence(client):
+    response = client.post("/ask", json={"question": ""})
+
+    assert response.status_code == 400
+    assert "Ask Nibble something" in response.json()["detail"]
+
+
+def test_a_whitespace_only_question_is_also_blank(client):
+    assert client.post("/ask", json={"question": "    "}).status_code == 400
+
+
+def test_a_body_with_no_question_at_all_is_422(client):
+    """Pydantic rejects this before our code runs — we write no code for it."""
+    assert client.post("/ask", json={}).status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Short-circuiting: no notes means no model call
+# ---------------------------------------------------------------------------
+
+
+def test_no_notes_at_all_gets_a_friendly_answer_and_empty_sources(client, asked):
+    response = client.post("/ask", json={"question": "explain osmosis"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["sources"] == []
+    assert "nothing in your notes" in body["answer"].lower()
+
+
+def test_no_notes_means_the_model_is_never_called(client, asked):
+    """The point of issue #16: do not pay for a request whose answer is known.
+
+    It is also a safety property. A model handed no notes has nothing to answer
+    from except what it learnt in training, which is the one thing this project
+    exists to prevent.
+    """
+    client.post("/ask", json={"question": "explain osmosis"})
+
+    assert asked == []
+
+
+def test_a_note_with_no_embedding_still_counts_as_nothing_to_answer_from(client, asked):
+    """Pre-slice-3 notes are skipped by retrieval, so this is the empty case."""
+    from app.db import get_db
+
+    _upload(client, "old.txt", "Osmosis is the net movement of water across a membrane.")
+    db = get_db()
+    db.execute("UPDATE chunks SET embedding = NULL")
+    db.commit()
+    db.close()
+
+    body = client.post("/ask", json={"question": "explain osmosis"}).json()
+
+    assert body["sources"] == []
+    assert asked == []
+
+
+# ---------------------------------------------------------------------------
+# The happy path
+# ---------------------------------------------------------------------------
+
+
+def test_the_answer_and_its_sources_match_the_contract(client, asked):
+    _upload(client, "biology.txt", "Osmosis is the net movement of water across a membrane.")
+
+    response = client.post("/ask", json={"question": "how does osmosis work"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["answer"] == "Water moves across the membrane (p. 1)."
+
+    source = body["sources"][0]
+    assert set(source) == {"document_id", "filename", "page", "excerpt"}
+    assert source["filename"] == "biology.txt"
+    assert source["page"] == 1
+    assert "Osmosis" in source["excerpt"]
+    assert isinstance(source["document_id"], int)
+
+
+def test_the_model_is_given_the_retrieved_notes_and_the_question(client, asked):
+    _upload(client, "biology.txt", "Osmosis is the net movement of water across a membrane.")
+
+    client.post("/ask", json={"question": "how does osmosis work"})
+
+    assert len(asked) == 1
+    assert asked[0]["question"] == "how does osmosis work"
+    assert "[biology.txt - p.1]" in asked[0]["context"]
+    assert "Osmosis is the net movement" in asked[0]["context"]
+
+
+def test_the_question_reaches_the_model_stripped(client, asked):
+    _upload(client, "biology.txt", "Osmosis is the net movement of water across a membrane.")
+
+    client.post("/ask", json={"question": "  how does osmosis work  "})
+
+    assert asked[0]["question"] == "how does osmosis work"
+
+
+def test_sources_are_capped_the_same_way_search_results_are(client, asked, monkeypatch):
+    """/ask reuses retrieval, so TOP_K governs both. This pins that it really does."""
+    monkeypatch.setattr("app.config.TOP_K", 2)
+    for n in range(5):
+        _upload(client, f"note{n}.txt", f"Osmosis note number {n}, with enough words to store.")
+
+    body = client.post("/ask", json={"question": "osmosis"}).json()
+
+    assert len(body["sources"]) == 2
+
+
+def test_a_long_chunk_is_cut_short_in_the_excerpt(client, asked):
+    """The chip is there to point at a page, not to reprint it."""
+    _upload(client, "long.txt", "Osmosis. " + ("water across a membrane. " * 60))
+
+    source = client.post("/ask", json={"question": "osmosis"}).json()["sources"][0]
+
+    assert len(source["excerpt"]) <= 201  # 200 characters plus the ellipsis
+    assert source["excerpt"].endswith("…")
+
+
+def test_a_short_chunk_is_not_given_an_ellipsis_it_does_not_need(client, asked):
+    _upload(client, "short.txt", "Osmosis is the net movement of water across a membrane.")
+
+    source = client.post("/ask", json={"question": "osmosis"}).json()["sources"][0]
+
+    assert not source["excerpt"].endswith("…")
+
+
+def test_a_refusal_from_the_model_comes_back_as_an_ordinary_answer(client, monkeypatch):
+    """The most important behaviour in the project is a 200, not an error."""
+    monkeypatch.setattr(
+        "app.routes.llm.answer", lambda question, context: "That isn't in your notes yet."
+    )
+    _upload(client, "biology.txt", "Osmosis is the net movement of water across a membrane.")
+
+    response = client.post("/ask", json={"question": "what is a black hole"})
+
+    assert response.status_code == 200
+    assert response.json()["answer"] == "That isn't in your notes yet."
+
+    # The sources are still there. They are what Nibble was allowed to read, and
+    # showing them is how somebody sees *why* it could not answer.
+    assert len(response.json()["sources"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# When something goes wrong, a person gets a sentence
+# ---------------------------------------------------------------------------
+
+
+def test_the_model_being_unreachable_is_503_with_a_plain_sentence(client, monkeypatch):
+    def unavailable(question, context):
+        raise llm.AnswerUnavailable("Could not reach the answering service: timed out")
+
+    monkeypatch.setattr("app.routes.llm.answer", unavailable)
+    _upload(client, "biology.txt", "Osmosis is the net movement of water across a membrane.")
+
+    response = client.post("/ask", json={"question": "osmosis"})
+
+    assert response.status_code == 503
+    assert "Nibble couldn't answer" in response.json()["detail"]
+
+
+def test_the_search_model_failing_to_load_is_also_a_sentence(client, monkeypatch):
+    def unavailable(texts):
+        raise EmbeddingUnavailable("The search model could not be loaded.")
+
+    monkeypatch.setattr("app.routes.embed_texts", unavailable)
+
+    response = client.post("/ask", json={"question": "osmosis"})
+
+    assert response.status_code == 503
+    assert "Nibble couldn't read your notes" in response.json()["detail"]
+
+
+def test_a_failure_never_shows_a_raw_exception(client, monkeypatch):
+    """CLAUDE.md: never a traceback or a provider error, always a sentence."""
+
+    def unavailable(question, context):
+        raise llm.AnswerUnavailable("The answering service answered with 500.")
+
+    monkeypatch.setattr("app.routes.llm.answer", unavailable)
+    _upload(client, "biology.txt", "Osmosis is the net movement of water across a membrane.")
+
+    detail = client.post("/ask", json={"question": "osmosis"}).json()["detail"]
+
+    assert "Traceback" not in detail
+    assert detail[0].isupper() and detail.endswith(".")

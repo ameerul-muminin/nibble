@@ -38,7 +38,12 @@ honest.
 Already decided, nothing open here: FastAPI with sync routes, SQLite through stdlib
 `sqlite3` with plain SQL, numpy cosine similarity for search, `fastembed` with
 `BAAI/bge-small-en-v1.5` at 384 dimensions running locally, Groq's free tier
-(`llama-3.3-70b-versatile`) for answers, and Vite + React in plain JavaScript.
+(`openai/gpt-oss-120b`) for answers, and Vite + React in plain JavaScript.
+
+**That chat model changed on 2026-09-07, and not by choice.** This said
+`llama-3.3-70b-versatile` from the start, and the first real `POST /ask` came
+back `404` — Groq had retired it. See the note under Slice 4; the lesson is
+worth more than the model name.
 
 Everything is free. There is no paid API and no credit card anywhere in this project.
 
@@ -57,7 +62,7 @@ already closed.
 | 1.5 | Handwriting and scans | — (unplanned)             | done, merged            |
 | 2   | Chunking              | Slice 2 — Chunking        | done, merged            |
 | 3   | Search, no AI yet     | Slice 3 — Search          | done, merged            |
-| 4   | Nibble answers        | Slice 4 — Nibble answers  | open                    |
+| 4   | Nibble answers        | Slice 4 — Nibble answers  | built, in review        |
 | 5   | Make it Nibble        | Slice 5 — Make it Nibble  | open                    |
 | 6   | Quiz mode (stretch)   | Slice 6 — Quiz mode       | open                    |
 
@@ -81,15 +86,27 @@ and no language model is involved anywhere in that path. That was the point of
 slice 3 being called the pivotal one, and it holds: if everything after this
 failed, there would still be something worth showing.
 
-**Slice 4 is next and nothing in it has started.** #15, #16 and #17 are open. It
-is the last slice the demo depends on, and who builds it is a decision that has
-not been made — see the ownership note under Slice 3 for why that matters more
-this time.
+**Slice 4 is built and waiting on review.** #15, #16 and #17 are still open on
+GitHub, and GitHub wins on status — they close when the PR merges. The full
+record is under Slice 4: what was built, the chat model Groq retired underneath
+us mid-slice, and why PR #39 was not merged.
+
+**The demo is now complete.** Upload a chapter, ask a question in your own words,
+and get an answer built from your own pages with the pages it read underneath it
+— and when your notes do not cover the question, it says so instead of inventing
+an answer. That refusal was checked by hand against a real key; the table is
+under Slice 4.
+
+**Who builds it went the same way as slice 3, and that is now a pattern rather
+than an exception.** Alif built #16 and #17 as well. It is written up under Slice
+4 rather than here, because it is a decision with a cost, not a status.
 
 What works, end to end: upload a PDF, a text file, a Markdown file or a photo;
 see it listed and delete it; a scan or handwriting gets read by a vision model
 instead of arriving empty; the text is cut into overlapping pieces you can look
-at; every piece is embedded as it is stored; and search finds the closest ones.
+at; every piece is embedded as it is stored; search finds the closest ones; and
+Nibble answers a question from those pieces, showing the pages it read and
+refusing when they do not cover it.
 
 ### The board now agrees with the code
 
@@ -1161,9 +1178,177 @@ underneath it makes the break invisible.
 hit it. A live demo with an audience uploading their own PDFs might — have a spare key
 on demo day.
 
-- [ ] #15 `llm.py` — ask Groq, and force it to stay grounded _(Alif)_
-- [ ] #16 `POST /ask` — search, then answer _(Fahim)_
-- [ ] #17 Turn the page into a chat with Nibble _(Arman)_
+**`sources` is what Nibble read, not what it quoted.** Every retrieved piece is
+listed, not just the ones a sentence cites. Working out which pages an answer
+actually used means parsing citations back out of prose, and being wrong there is
+worse than not guessing: it hides a page that was used, or claims one that was
+not. "These are the only pages it was allowed to look at" is true, checkable, and
+the sentence to say at the demo.
+
+**Retrieval lives in one function, `_retrieve()`, that both routes call.** `/search`
+returns what it finds; `/ask` hands what it finds to the model. That was issue #16's
+whole lesson — reuse your own code rather than copying it — and the reason is
+concrete: every later fix to how searching works would otherwise have to be
+remembered twice, and the second copy is the one that gets missed.
+
+**`/search` stays, and stays visible in the UI, now that `/ask` exists.** The
+temptation is to fold it in once there is a chat on the page. Keeping it is what
+makes the answer above it believable: you can watch the retrieval happen with no
+model anywhere near it, then watch the same pieces come back as a sentence.
+
+### Built, 2026-09-07
+
+- [x] #15 `llm.py` — `SYSTEM_PROMPT`, `build_context()`, `answer()`, and an
+      `AnswerUnavailable` error that mirrors `OcrUnavailable` and
+      `EmbeddingUnavailable`. Nothing else in the backend calls the chat model.
+- [x] #16 `POST /ask` — retrieval reused through `_retrieve()`, a short-circuit
+      that returns a friendly sentence **without calling the model** when nothing
+      came back, and 200/400/503 exactly as `api.md` now describes.
+- [x] #17 `ask()` in `api.js`, and the chat on the page — a `turns` array that is
+      only ever appended to, question bubbles that appear instantly, and a source
+      chip per page read.
+- [x] 33 new tests (`test_llm.py`, `test_ask.py`). **132 backend tests pass**,
+      lint and format clean, frontend lint and build clean.
+- [x] Verified against the real Groq API, not just fakes: a covered question
+      answered with a real page citation in ~2s, an uncovered one refused, an
+      empty database short-circuited in under a second.
+
+### The chat model was retired mid-slice, and that is the lesson here
+
+The first real `POST /ask` returned **503, "The answering service answered with
+404."** `llama-3.3-70b-versatile` — named in this file, in `config.py` and in
+`HANDOFF.md` since the beginning — no longer exists on Groq. Not deprecated with
+a warning; gone, answering 404 like a typo would.
+
+`GET /models` on the same key listed what was actually there, and
+`openai/gpt-oss-120b` replaced it.
+
+**A hosted model is not a decision you make once.** Every other choice in this
+project stays made: SQLite is a file, numpy is numpy, and `fastembed` runs on the
+laptop and will still run in a year with no internet at all. The one component
+rented from somebody else is the one that broke, without a line of our code
+changing. That is the honest trade for "free chat with no card", and it is worth
+being able to say out loud at the demo rather than being surprised by.
+
+Two things that made this a ten-minute problem instead of an afternoon:
+
+- **The error was already a plain sentence.** `llm.py` never passes Groq's own
+  words through, so the failure arrived as "The answering service answered with
+  404" rather than a traceback — and 404 pointed straight at the model name.
+- **`CHAT_MODEL` was in `config.py` and nowhere else.** One line changed.
+
+**Check `GET /models` first when answering suddenly stops working.** It is the
+one failure in this project that nobody's code caused.
+
+### What "low" reasoning is doing in config
+
+`openai/gpt-oss-120b` thinks before it answers, and how much is a setting.
+Running the same five questions at `low` and `medium`: the answers were no
+better at `medium` and cost two to four times the tokens. On a free tier shared
+with reading handwriting, tokens are the budget.
+
+Not zero, though. Deciding *"is this actually in the notes?"* is the one piece of
+thinking this project genuinely wants — it is the refusal, and the refusal is the
+product.
+
+Worth knowing before anyone swaps the model: this one keeps its thinking in a
+separate `reasoning` field, so there is nothing to strip out. The vision model in
+`ocr.py` inlines it in `<think>` tags and `_strip_thinking()` exists for exactly
+that reason. A model that inlines its thinking would put it straight on screen.
+
+### The refusal, checked by hand
+
+The one behaviour no test can assert — a test would only be checking a fake. Run
+against real notes about osmosis and a real key:
+
+| Asked | Answered |
+| --- | --- |
+| "how does osmosis work" | the definition, citing `(p. 1)` |
+| "explain how a black hole forms" | "That isn't in your notes yet." |
+| "what is the capital of France" | "That isn't in your notes yet." |
+| **"what is diffusion"** | **"That isn't in your notes yet."** |
+
+The last row is the one that matters. Diffusion is one concept away from osmosis,
+every model on earth knows what it is, and the notes did not mention it — so it
+refused. A model that answers that one from training is a model that will invent
+a fact under exam conditions and sound completely confident doing it.
+
+**Re-run these four after any change to `SYSTEM_PROMPT` or `CHAT_MODEL`.** The
+prompt is the only thing holding this behaviour up, and nothing in CI can tell
+you it stopped working.
+
+### Fixed in review: the conversation outlived the person who had it
+
+Found by review on PR #40. **Signing out does not clear anything on this page.**
+
+`App` returns `<Landing />` when nobody is signed in, and a `return` is not the
+component going away — React keeps it mounted in the same position and every
+`useState` in it keeps its value. Sign out, sign in as somebody else in the same
+tab, and the previous person's questions and answers are still on screen.
+
+It is broader than the chat. `searched` from slice 3 is rendered verbatim — "5
+pieces for *"…"*" — so the last thing the previous person typed into the search
+box was sitting there too. Fixing only the transcript would have left an
+identical leak beside it, looking fixed.
+
+**This is not covered by the open-backend decision above.** That decision says
+everyone shares the same notes, and it is written down so nobody is surprised.
+The *questions somebody typed* are not shared by any decision, and they are the
+most personal thing on the page — you can tell what a person did not understand.
+
+The fix is `<Nibble key={userId ?? 'signed-out'} />`. Changing a `key` tells
+React the thing at that position is a different one now, so it throws the old
+component away and builds a new one with fresh state.
+
+Chosen over clearing each piece of state by hand for the reason `ON DELETE
+CASCADE` was chosen over a hand-written `DELETE` in slice 1: **a list of things
+to reset is a list somebody has to remember to add to**, and the day it is
+forgotten it fails silently. Every state added from here on is covered for free,
+including an answer still in flight when the user changes — that arrives to a
+component that no longer exists and React drops it.
+
+- [ ] **Not yet verified in a browser.** Lint and build pass. Actually signing
+      out and back in as a second Clerk account, in one tab, is a person's job.
+
+### Still needing a person
+
+- [ ] **Nobody has opened this in a browser yet.** The API is verified end to end
+      with real Groq calls; the chat UI is verified only by lint and build.
+- [ ] **The board.** #15, #16 and #17 close when this merges.
+- [ ] **Who built it.** This is the second slice in a row where the work did not
+      go to the people it was assigned to — #16 was Fahim's and #17 was Arman's.
+      See below; it is a decision, not an oversight.
+
+### PR #39 was not merged, and why
+
+Fahim opened #39 for slice 4 on 2026-09-07. It was **branched from `6afb799`**,
+the rebuild commit, so it had never seen slices 1, 1.5, 2 or 3. Merging it would
+have reverted `routes.py` and `files.py` to their slice-0 state: no
+`_safe_filename()`, so the path-traversal fix would have come back out; no
+chunking, no embedding on upload, no `POST /search`, no `DELETE`, and the
+`.text`/`.markdown` extensions the contract had already settled.
+
+Its `/ask` also could not run. It imported `search_chunks` from `app.embeddings`,
+a function that has never existed there, and the import sat above the `try` — so
+every request would have been a 500. The `except Exception: results = []`
+underneath would then have called Groq with no notes at all, which is the exact
+short-circuit #16 exists to prevent.
+
+**None of that is a review comment about code quality — it is a branching
+problem**, and it is worth writing down because it will happen again:
+
+- **Always `git checkout main && git pull` before `git checkout -b`.** #39 was
+  branched once and worked on while five PRs merged underneath it.
+- **A PR that adds a file which already exists on `main` is the tell.** #39 added
+  `db.py` and `files.py` as new files. That is never a rebase away from correct.
+
+The work was rebuilt on current `main` rather than rebased — three commits of
+divergence against a tree that had moved that far is not a rebase, it is a
+rewrite with extra steps.
+
+- [x] #15 `llm.py` — ask Groq, and force it to stay grounded _(Alif)_
+- [x] #16 `POST /ask` — search, then answer _(built by Alif; #39 not merged)_
+- [x] #17 Turn the page into a chat with Nibble _(built by Alif)_
 
 ## Slice 5: Make it Nibble
 

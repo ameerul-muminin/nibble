@@ -23,7 +23,7 @@ from pathlib import Path, PurePosixPath
 from fastapi import APIRouter, HTTPException, UploadFile, status
 from pydantic import BaseModel
 
-from app import config, ocr
+from app import config, llm, ocr
 from app.chunking import chunk_pages
 from app.db import get_db
 from app.embeddings import EmbeddingUnavailable, cosine_similarity, embed_texts
@@ -408,14 +408,13 @@ class SearchRequest(BaseModel):
     query: str
 
 
-@router.post("/search")
-def search(request: SearchRequest):
-    """Find the pieces of your notes that mean the closest thing to a query.
+def _retrieve(query: str) -> tuple[list[dict], list[int]]:
+    """Find the pieces of the notes that mean the closest thing to some text.
 
     **No language model is involved anywhere in here.** This is retrieval on its
-    own, and it is worth understanding before slice 4 puts an answer on top of
-    it: everything that makes Nibble able to find the right page already happens
-    in this function. Slice 4 only adds the sentence at the end.
+    own, and it is worth understanding before reading the ``/ask`` route below:
+    everything that makes Nibble able to find the right page happens in this
+    function. Slice 4 only adds the sentence on the end of it.
 
     Four steps, and none of them is clever:
 
@@ -425,24 +424,17 @@ def search(request: SearchRequest):
     3. Score all of them at once against the query.
     4. Return the best TOP_K, highest first.
 
-    Contract, from docs/api.md: {"results": [...], "unsearchable_note_ids": [...]}.
-    """
-    # A blank box is a person pressing enter, not an error worth a stack trace.
-    # .strip() first, because "   " is blank to a human and truthy to Python.
-    query = request.query.strip()
-    if not query:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Type something to search for and Nibble will look through your notes.",
-        )
+    Returns ``(results, unsearchable_note_ids)``. Raises ``EmbeddingUnavailable``
+    if the model could not be loaded — each route catches that itself, because
+    "Nibble couldn't search" and "Nibble couldn't answer" are different sentences
+    to the person reading them.
 
-    try:
-        query_vector = embed_texts([query])[0]
-    except EmbeddingUnavailable as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Nibble couldn't search just now. {exc}",
-        ) from exc
+    This lives outside a route because two routes need it. ``/search`` returns
+    what it finds, and ``/ask`` hands what it finds to the model. Copying the
+    body of one into the other would mean every future fix to how searching works
+    has to be remembered twice, and the second copy is the one that gets missed.
+    """
+    query_vector = embed_texts([query])[0]
 
     db = get_db()
     try:
@@ -516,7 +508,7 @@ def search(request: SearchRequest):
     # database holding only pre-slice-3 notes, or one where every stored vector
     # was made by a different model. An empty list is a real answer.
     if not rows:
-        return {"results": [], "unsearchable_note_ids": unsearchable_note_ids}
+        return [], unsearchable_note_ids
 
     scores = cosine_similarity(query_vector, matrix)
 
@@ -524,20 +516,152 @@ def search(request: SearchRequest):
     # so [::-1] flips it to high-to-low and the slice takes the best few.
     best = scores.argsort()[::-1][: config.TOP_K]
 
+    results = [
+        {
+            "document_id": rows[i]["document_id"],
+            "filename": rows[i]["filename"],
+            "page": rows[i]["page"],
+            "content": rows[i]["content"],
+            # Two conversions, both deliberate. float() because numpy's own
+            # float32 is not JSON. max(0.0, ...) because a cosine runs -1 to
+            # 1 and docs/api.md promises 0 to 1 — "less related than
+            # unrelated" is not a distinction worth showing a student.
+            "score": round(max(0.0, float(scores[i])), 3),
+        }
+        for i in best
+    ]
+
+    return results, unsearchable_note_ids
+
+
+@router.post("/search")
+def search(request: SearchRequest):
+    """Show which pieces of your notes came closest to what you typed.
+
+    All of the work is in ``_retrieve`` above. This route exists to make that
+    work visible on its own, with no model anywhere near it — which is why it
+    stays after slice 4 rather than being folded into ``/ask``. Being able to
+    see the retrieval by itself is what makes the answer above it believable.
+
+    Contract, from docs/api.md: {"results": [...], "unsearchable_note_ids": [...]}.
+    """
+    # A blank box is a person pressing enter, not an error worth a stack trace.
+    # .strip() first, because "   " is blank to a human and truthy to Python.
+    query = request.query.strip()
+    if not query:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Type something to search for and Nibble will look through your notes.",
+        )
+
+    try:
+        results, unsearchable_note_ids = _retrieve(query)
+    except EmbeddingUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Nibble couldn't search just now. {exc}",
+        ) from exc
+
+    return {"results": results, "unsearchable_note_ids": unsearchable_note_ids}
+
+
+# ---------------------------------------------------------------------------
+# Slice 4 — Nibble answers, from your notes, with the pages it used
+# ---------------------------------------------------------------------------
+
+
+class AskRequest(BaseModel):
+    """The body of a POST /ask request: {"question": "explain osmosis simply"}."""
+
+    question: str
+
+
+# How much of a chunk goes into an excerpt on screen.
+#
+# The chip under an answer is there so somebody can tell at a glance which page
+# a claim came from, then go and read it. A couple of sentences does that; the
+# whole 900-character chunk would bury the answer it is supposed to support.
+_EXCERPT_CHARS = 200
+
+
+def _excerpt(content: str) -> str:
+    """The first couple of sentences of a chunk, with an ellipsis if it was cut."""
+    if len(content) <= _EXCERPT_CHARS:
+        return content
+
+    # rstrip() so the ellipsis does not end up after a space, which looks like a
+    # mistake rather than a truncation.
+    return content[:_EXCERPT_CHARS].rstrip() + "…"
+
+
+@router.post("/ask")
+def ask(request: AskRequest):
+    """The endpoint the whole project exists for. Search the notes, then answer from them.
+
+    This route is deliberately mostly glue, and that is the point of it. It does
+    three things:
+
+    1. Run exactly the same retrieval ``/search`` runs — the same function, not a
+       copy of it.
+    2. If nothing came back, say so and stop. **The model is not called at all**,
+       which is why this check is before the call and not a special case inside
+       it: there is no point paying for a request whose answer is already known,
+       and a model handed no notes is a model with nothing to do but invent.
+    3. Otherwise hand those pieces to llm.py and return what it says, along with
+       the pages it was allowed to look at.
+
+    Contract, from docs/api.md: {"answer": "...", "sources": [...]}.
+
+    **``sources`` is what Nibble read, not what it happened to quote.** Working
+    out which pages a sentence actually used would mean parsing citations back
+    out of the answer, and guessing wrong there is worse than not guessing —
+    it would either hide a page that was used or claim one that was not. What
+    is honest, and checkable, is the list of pieces put in front of the model:
+    every page it could possibly have drawn on is on screen, and nothing else
+    was available to it. That is the sentence to say at the demo.
+    """
+    question = request.question.strip()
+    if not question:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Ask Nibble something and it will look through your notes.",
+        )
+
+    try:
+        results, _unsearchable = _retrieve(question)
+    except EmbeddingUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Nibble couldn't read your notes just now. {exc}",
+        ) from exc
+
+    # Nothing to answer from. An empty database, or one holding only notes from
+    # before search existed. This is a real answer rather than an error, and it
+    # is returned without going anywhere near the model.
+    if not results:
+        return {
+            "answer": "There's nothing in your notes about that yet. Add the chapter it "
+            "should be in and ask me again.",
+            "sources": [],
+        }
+
+    try:
+        text = llm.answer(question, llm.build_context(results))
+    except llm.AnswerUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Nibble couldn't answer just now. {exc}",
+        ) from exc
+
     return {
-        "results": [
+        "answer": text,
+        "sources": [
             {
-                "document_id": rows[i]["document_id"],
-                "filename": rows[i]["filename"],
-                "page": rows[i]["page"],
-                "content": rows[i]["content"],
-                # Two conversions, both deliberate. float() because numpy's own
-                # float32 is not JSON. max(0.0, ...) because a cosine runs -1 to
-                # 1 and docs/api.md promises 0 to 1 — "less related than
-                # unrelated" is not a distinction worth showing a student.
-                "score": round(max(0.0, float(scores[i])), 3),
+                "document_id": result["document_id"],
+                "filename": result["filename"],
+                "page": result["page"],
+                "excerpt": _excerpt(result["content"]),
             }
-            for i in best
+            for result in results
         ],
-        "unsearchable_note_ids": unsearchable_note_ids,
     }
