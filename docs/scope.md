@@ -1277,6 +1277,39 @@ a fact under exam conditions and sound completely confident doing it.
 prompt is the only thing holding this behaviour up, and nothing in CI can tell
 you it stopped working.
 
+### Fixed in review: the conversation outlived the person who had it
+
+Found by review on PR #40. **Signing out does not clear anything on this page.**
+
+`App` returns `<Landing />` when nobody is signed in, and a `return` is not the
+component going away — React keeps it mounted in the same position and every
+`useState` in it keeps its value. Sign out, sign in as somebody else in the same
+tab, and the previous person's questions and answers are still on screen.
+
+It is broader than the chat. `searched` from slice 3 is rendered verbatim — "5
+pieces for *"…"*" — so the last thing the previous person typed into the search
+box was sitting there too. Fixing only the transcript would have left an
+identical leak beside it, looking fixed.
+
+**This is not covered by the open-backend decision above.** That decision says
+everyone shares the same notes, and it is written down so nobody is surprised.
+The *questions somebody typed* are not shared by any decision, and they are the
+most personal thing on the page — you can tell what a person did not understand.
+
+The fix is `<Nibble key={userId ?? 'signed-out'} />`. Changing a `key` tells
+React the thing at that position is a different one now, so it throws the old
+component away and builds a new one with fresh state.
+
+Chosen over clearing each piece of state by hand for the reason `ON DELETE
+CASCADE` was chosen over a hand-written `DELETE` in slice 1: **a list of things
+to reset is a list somebody has to remember to add to**, and the day it is
+forgotten it fails silently. Every state added from here on is covered for free,
+including an answer still in flight when the user changes — that arrives to a
+component that no longer exists and React drops it.
+
+- [ ] **Not yet verified in a browser.** Lint and build pass. Actually signing
+      out and back in as a second Clerk account, in one tab, is a person's job.
+
 ### Still needing a person
 
 - [ ] **Nobody has opened this in a browser yet.** The API is verified end to end

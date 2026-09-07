@@ -22,7 +22,40 @@ const MESSAGES = {
   down: 'Can’t reach the backend. Open a second terminal, go to the backend folder, and run: uvicorn app.main:app --reload',
 }
 
+/**
+ * Everything below belongs to whoever is signed in right now, and nothing of it
+ * survives them signing out.
+ *
+ * This wrapper is four lines and it exists for a bug that is easy to write and
+ * hard to spot. `Nibble` returns <Landing /> when nobody is signed in — but a
+ * `return` is not the component going away. React keeps it mounted in the same
+ * place in the tree, so every useState inside it keeps its value. Sign out, sign
+ * in as somebody else in the same tab, and the previous person's conversation is
+ * still on screen: their questions, the answers, and the text they searched for.
+ *
+ * `key` is how you say "this is a different one now". React uses it to decide
+ * whether the thing at this position is the same thing it drew last time, and
+ * when it changes React throws the old one away and builds a new one — with
+ * every piece of state fresh. It is the same idea as key={doc.id} on the rows of
+ * the notes list, used deliberately rather than incidentally.
+ *
+ * Doing it here rather than clearing each piece of state by hand is the same
+ * reasoning as ON DELETE CASCADE in db.py: a list of things to reset is a list
+ * somebody has to remember to add to, and the day it gets forgotten it fails
+ * silently. This cannot be forgotten. Every state added from here on is covered
+ * by it for free, including an answer still in flight when the user changes —
+ * that arrives to a component that no longer exists, and React drops it.
+ */
 export default function App() {
+  const { userId } = useAuth()
+
+  // ?? 'signed-out' because userId is null when nobody is signed in and
+  // undefined while Clerk is still looking. A key of null or undefined is the
+  // same as no key at all, which would leave the state exactly where it was.
+  return <Nibble key={userId ?? 'signed-out'} />
+}
+
+function Nibble() {
   // Who is looking at this? isLoaded is false for the first moment, while Clerk
   // checks the browser for an existing session. Both flags matter: <Show> was
   // used here before and it renders NOTHING while loading, which is invisible
