@@ -68,12 +68,12 @@ dropped if time runs out.
 "osmosis" and watching the right paragraph surface. It's the moment RAG stops being
 magic, and it's a working demo on its own even if everything after it fails.
 
-## Current state, 2026-09-06 (evening)
+## Current state, 2026-09-07
 
-`main` is at `c55260d`, and Slice 2 is built on `feat/slice-2-chunking` and not
-yet merged. **Every earlier pull request has merged — there are none
-left.** #24, #25, #28, #29, #30 and #31 all landed today, after the queue had sat
-untouched for four weeks.
+`main` is at `9c0765f` and **Slices 0, 1, 1.5 and 2 are all merged.** #33 (chunking),
+#35 (the slice 2 handover and the open-backend decision) and #34 (the landing page)
+landed in the last day. Slice 3 has started: #11 is built and open as PR #36; #12,
+#13 and #14 are not.
 
 Slices 0, 1 and 1.5 are in `main` and work. You can upload a PDF, a text file, a
 Markdown file or a photo, see it listed, and delete it — and a scanned or
@@ -89,9 +89,10 @@ The rule that produced the fix is worth keeping: an issue is done when it is
 closed, not when a box here is ticked. Saying the two disagreed out loud, rather
 than quietly ticking the boxes, is what got them closed.
 
-Slice 2's three issues (#8, #9, #10) are **built but still open**, and stay open
-until the pull request merges. Slice 3 is next and Fahim is taking it, which ends
-the one-off where Alif wrote all of slice 2 — see the note under Slice 3.
+Slice 2's three issues (#8, #9, #10) **closed when PR #33 merged**, which is the
+mirror working the way it is supposed to. Slice 3 is now underway, and Fahim is
+taking #12 and #13, which ends the one-off where Alif wrote all of slice 2 — see the
+note under Slice 3.
 
 ### Two things that are true and easy to misread as "finished"
 
@@ -778,9 +779,17 @@ the difference between a search that feels instant and one that looks broken.
 **`EMBEDDING_DIM` is 384.** Anything in `reference/original-scaffold` saying 1536 is
 describing the old OpenAI setup and does not apply here.
 
-**`fastembed` downloads about 130 MB the first time it runs.** It needs internet once
-and is offline after. Flagged in [`first-week.md`](./first-week.md) so it reads as
-expected rather than as a hang.
+**`fastembed` downloads the model the first time it runs.** It needs internet once
+and is offline after.
+
+Two corrections to that sentence, both found by measuring rather than by reading,
+2026-09-07. **It is about 65 MB, not 130.** The 130 figure had been repeated in four
+files since the plan was written and nobody had ever looked; the model directory on
+disk is 65 MB and the CI cache it produces is 61 MB compressed. And it was **not**
+flagged in [`first-week.md`](./first-week.md), which this file claimed twice — that
+doc did not mention the download at all until now. A setup doc that goes quiet for a
+minute during `pytest -q` with no explanation is the thing that doc exists to prevent,
+so it now says what the pause is.
 
 ### Decided 2026-09-07, before building
 
@@ -824,7 +833,7 @@ job queue, which is a whole second system to explain.
 
 **`test_embeddings.py` uses the real model; everything else stubs it.** A stubbed
 embedder returning made-up numbers cannot be wrong about *meaning*, so it would pass
-the cat/kitten test while proving nothing. The 130 MB download is cached in CI, keyed
+the cat/kitten test while proving nothing. The 65 MB download is cached in CI, keyed
 on the model name — change `EMBEDDING_MODEL` and that key has to change with it, or
 CI restores the wrong model and downloads on every run. Route tests stub `embed_texts`
 so the suite stays fast.
@@ -847,7 +856,7 @@ line: the exception ends where somebody else's issue begins.
 - [x] `backend/tests/test_embeddings.py` — 11 tests. **83 pass**, up from 72
 - [x] `docs/api.md` — the Slice 3 errors, the clamp, and `unsearchable_notes`,
       written **before** #12 and #13 start, which is what the contract rule is for
-- [x] The fastembed model cached in CI, so only the first run pays 130 MB
+- [x] The fastembed model cached in CI, so only the first run pays for the download
 
 **A float32 lesson, from a test that failed.** `cosine_similarity([1,2,3], [[1,2,3]])`
 does not return 1.0. It returns 0.99999994, because dividing by a length and

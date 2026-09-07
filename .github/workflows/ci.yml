@@ -30,7 +30,7 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version-file: backend/.python-version
-      # The embedding model is a ~130 MB download, and tests/test_embeddings.py
+      # The embedding model is a ~65 MB download, and tests/test_embeddings.py
       # uses the real one on purpose — a stubbed embedder cannot be wrong about
       # meaning, so stubbing it would prove nothing. Cached, so only the first
       # run pays for it.

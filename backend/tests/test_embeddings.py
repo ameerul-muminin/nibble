@@ -6,7 +6,7 @@ the claim this file makes is that *meaning* is captured, and a stub cannot be
 wrong about meaning. A fake embedder returning made-up numbers would pass every
 assertion below while proving nothing at all.
 
-The cost is that the first run downloads about 130 MB and takes a minute. Every
+The cost is that the first run downloads about 65 MB and takes a minute. Every
 run after that is fast, and CI caches the download between runs. If it is not
 downloaded and there is no internet, these tests fail loudly rather than being
 quietly skipped — a search test that skips itself is how a broken search reaches

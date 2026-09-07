@@ -21,7 +21,7 @@ what we want, because a long paragraph and a short one about the same topic
 should still count as close.
 
 **This runs on your own laptop.** No API key, no rate limit, no bill. ``fastembed``
-downloads about 130 MB the first time it is used and works offline afterwards —
+downloads about 65 MB the first time it is used and works offline afterwards —
 that download is mentioned in docs/first-week.md so it reads as expected rather
 than as a hang. Groq, which answers questions in slice 4, has no embeddings API
 at all; that is why this one part of the project does not go through the same
@@ -72,7 +72,7 @@ def get_model() -> TextEmbedding:
         except Exception as exc:  # every way this fails means the same thing to a person
             raise EmbeddingUnavailable(
                 "The search model could not be loaded. The first run downloads "
-                "about 130 MB, so check you are online and try again."
+                "about 65 MB, so check you are online and try again."
             ) from exc
 
     return _model
