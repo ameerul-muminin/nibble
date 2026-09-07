@@ -425,7 +425,7 @@ def search(request: SearchRequest):
     3. Score all of them at once against the query.
     4. Return the best TOP_K, highest first.
 
-    Contract, from docs/api.md: {"results": [...], "unsearchable_notes": N}.
+    Contract, from docs/api.md: {"results": [...], "unsearchable_note_ids": [...]}.
     """
     # A blank box is a person pressing enter, not an error worth a stack trace.
     # .strip() first, because "   " is blank to a human and truthy to Python.
@@ -500,13 +500,23 @@ def search(request: SearchRequest):
         comparable.append(row)
 
     rows = comparable
-    unsearchable_notes = len(unsearchable_ids)
+
+    # The ids, not a count, and sorted so the answer is the same every time.
+    #
+    # A count cannot be reconciled with anything. Delete one of these notes and
+    # the frontend has a number it can no longer trust: it does not know whether
+    # the note it just deleted was one of the ones being counted, so it either
+    # leaves a stale sentence on screen telling somebody to delete a note that is
+    # already gone, or hides a true one. With ids it filters them exactly the way
+    # it filters results, through the same set, and the number it shows is
+    # counted from what is left.
+    unsearchable_note_ids = sorted(unsearchable_ids)
 
     # No pieces to compare against is an ordinary state — a fresh install, a
     # database holding only pre-slice-3 notes, or one where every stored vector
     # was made by a different model. An empty list is a real answer.
     if not rows:
-        return {"results": [], "unsearchable_notes": unsearchable_notes}
+        return {"results": [], "unsearchable_note_ids": unsearchable_note_ids}
 
     scores = cosine_similarity(query_vector, matrix)
 
@@ -529,5 +539,5 @@ def search(request: SearchRequest):
             }
             for i in best
         ],
-        "unsearchable_notes": unsearchable_notes,
+        "unsearchable_note_ids": unsearchable_note_ids,
     }

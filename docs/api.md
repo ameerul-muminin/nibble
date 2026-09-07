@@ -163,7 +163,7 @@ Response:
       "score": 0.82
     }
   ],
-  "unsearchable_notes": 0
+  "unsearchable_note_ids": []
 }
 ```
 
@@ -176,12 +176,22 @@ cosine, which can technically come back negative for two pieces of text pointing
 in opposite directions; anything below zero is reported as `0`, because "less
 related than unrelated" is not a distinction worth showing anybody.
 
-`unsearchable_notes` is how many uploaded notes **cannot be searched at all**,
-because they were stored before search existed and have no embedding. It is
-almost always `0`. When it is not, the frontend says so in a sentence — a note
-that silently never matches anything is the exact failure this project keeps
-having, and a count on screen is what stops it being silent. The fix is to delete
-those notes and upload them again; nothing backfills them.
+`unsearchable_note_ids` names the uploaded notes that **cannot be searched at
+all**. It is usually empty. A note lands in it for one of two reasons: it was
+stored before search existed and has no embedding, or its stored numbers were
+made by a different embedding model and are the wrong width to compare against
+anything. Both mean the same thing to a person, and both have the same fix —
+delete that note and upload it again. Nothing backfills them.
+
+The frontend shows the length of this list in a sentence, because a note that
+silently never matches anything is the exact failure this project keeps having.
+
+**It is a list of ids rather than a count on purpose.** The frontend has to
+reconcile it with deletions, and a bare number cannot be reconciled: delete one
+of these notes and the number cannot say whether that note was one of the ones it
+counted, so the page either keeps telling somebody to delete a note that is
+already gone, or hides a warning that is still true. With ids it filters this
+list exactly the way it filters `results`, and counts what is left.
 
 Errors:
 

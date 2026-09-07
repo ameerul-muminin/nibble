@@ -195,11 +195,18 @@ export default function App() {
   const [searchStatus, setSearchStatus] = useState('idle') // idle | searching | ready | failed
   const [searchError, setSearchError] = useState(null)
 
-  // How many notes cannot be searched at all, straight from the backend. These
-  // are notes stored before slice 3 existed, which have no embedding — they sit
-  // in the list looking perfectly normal and match nothing, so the number gets
+  // Which notes cannot be searched at all, by id, straight from the backend.
+  // These are notes stored before slice 3 existed, which have no embedding —
+  // they sit in the list looking perfectly normal and match nothing, so they get
   // said out loud rather than left to be discovered during a demo.
-  const [unsearchable, setUnsearchable] = useState(0)
+  //
+  // Ids rather than the count, because a count cannot survive a deletion: delete
+  // one of these notes and a number cannot tell you whether it was one of the
+  // ones being counted, so the page would keep telling you to delete a note that
+  // is already gone. A list can be filtered, exactly like the results are, and
+  // the number shown is counted from what is left.
+  const [unsearchableIds, setUnsearchableIds] = useState([])
+  const unsearchable = unsearchableIds.length
 
   // Which search is the newest one. Every search takes the next number, and an
   // answer is only allowed to write to the screen if its number is still the
@@ -257,8 +264,20 @@ export default function App() {
       //
       // Unlike the stale-response guard above, this one is reachable right now:
       // start a search, click × on a note, and the results land after it.
-      setResults(body.results.filter((result) => !deletedIds.current.has(result.document_id)))
-      setUnsearchable(body.unsearchable_notes)
+      // Both lists go through the same filter, for the same reason. A note
+      // deleted while this request was in the air is gone, whether it was one
+      // of the matches or one of the notes that could never be matched.
+      const notDeleted = (id) => !deletedIds.current.has(id)
+
+      setResults(body.results.filter((result) => notDeleted(result.document_id)))
+
+      // ?? [] because a backend older than this page does not send this field,
+      // and reaching for .filter on nothing is a TypeError — which would land in
+      // the catch below and put a raw JavaScript error on screen. That is the
+      // stale-backend problem again, and the same rule applies: the two halves
+      // of the app disagreeing must never look like a crash. Search still works
+      // here; only the notice about unsearchable notes goes quiet.
+      setUnsearchableIds((body.unsearchable_note_ids ?? []).filter(notDeleted))
       setSearched(trimmed)
       setSearchStatus('ready')
     } catch (error) {
@@ -344,10 +363,17 @@ export default function App() {
       // filename that no longer exists until somebody searched again.
       setResults((current) => current.filter((result) => result.document_id !== id))
 
-      // Clearing the results on screen is not enough on its own: a search that
-      // was already in the air will arrive afterwards carrying this note, and
-      // put it straight back. Remembering the id is what lets handleSearch
-      // filter it out when that answer lands.
+      // And the same for the notes-that-cannot-be-searched notice, which is the
+      // other thing on screen naming a document. Without this, deleting exactly
+      // the note that notice is about leaves it saying "1 note was added before
+      // search existed — delete it and upload again" about a note that is no
+      // longer there. That one needs no race at all to see.
+      setUnsearchableIds((current) => current.filter((noteId) => noteId !== id))
+
+      // Clearing what is on screen is not enough on its own: a search that was
+      // already in the air will arrive afterwards carrying this note, in either
+      // list, and put it straight back. Remembering the id is what lets
+      // handleSearch filter it out when that answer lands.
       deletedIds.current.add(id)
     } catch {
       setNotice('Could not delete that note. Try again in a moment.')

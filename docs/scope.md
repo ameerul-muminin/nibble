@@ -842,7 +842,7 @@ startup — and skipping won, for the same reason slice 2 refused to backfill: a
 migration nobody runs twice costs more than deleting a note and uploading it again.
 
 What makes that safe rather than silent is the counting. `POST /search` returns
-`unsearchable_notes`, and the search box says how many notes cannot be searched and
+`unsearchable_note_ids`, and the search box says how many notes cannot be searched and
 what to do about it. A note that sits in the list and quietly never matches anything
 is the exact failure slice 1.5 and slice 2 both exist to remove; this is the third
 door into it, and it is shut the same way — loudly.
@@ -875,7 +875,7 @@ point — see the ownership note above for what actually happened.
 - [x] `backend/app/embeddings.py` — `get_model()`, `embed_texts()`,
       `cosine_similarity()`, and `EmbeddingUnavailable` for a load that fails
 - [x] `backend/tests/test_embeddings.py` — 11 tests. **83 pass**, up from 72
-- [x] `docs/api.md` — the Slice 3 errors, the clamp, and `unsearchable_notes`,
+- [x] `docs/api.md` — the Slice 3 errors, the clamp, and the unsearchable notes,
       written **before** #12 and #13 start, which is what the contract rule is for
 - [x] The fastembed model cached in CI, so only the first run pays for the download
 - [x] A `threading.Lock` around the model build, after review found two threads
@@ -997,7 +997,9 @@ Not tests — the actual backend, on the real dev database, which still holds th
 pre-slice-3 notes:
 
 - **A blank query** returns 400 and the sentence, not a stack trace.
-- **Before uploading anything new: `{"results": [], "unsearchable_notes": 2}`.** The
+- **Before uploading anything new: `{"results": [], "unsearchable_notes": 2}`.** (That
+  field was renamed to `unsearchable_note_ids` in review afterwards — the quote is
+  what the server said at the time.) The
   skip-and-count decision, working on real rows rather than in a fixture. Those two
   notes are `ch1 DB.pdf` and an older osmosis note, both stored before slice 3.
 - **Uploading a note took 2.1 seconds**, embedding included, and it was immediately
@@ -1043,8 +1045,33 @@ right remedy here too. The two kinds of unsearchable note are found in different
 places, one in SQL and one in Python, so they are collected as a **set of ids** and
 counted at the end; adding two counts would report one note twice.
 
-**98 tests pass**, up from 96. Both new backend tests were run against the
-unguarded code first and fail there.
+**4. The unsearchable count went stale after a delete, and a count could not be
+fixed.** Reported as a race — delete an unsearchable note while a search is in
+the air, and the arriving response reinstates a count that includes it. True, and
+**the same bug is reachable with no race at all**: search, read "1 note was added
+before search existed — delete it and upload again", delete exactly that note, and
+the sentence stays until the next search.
+
+The interesting part is *why* the first three fixes did not cover this one. A
+count cannot be reconciled with a deletion. The frontend has a number and no way
+to know whether the note it just deleted was one of the notes being counted, so
+whatever it does — leave the number, or decrement it — is wrong half the time.
+
+So the contract changed while it still costs nothing to change it: `POST /search`
+now returns **`unsearchable_note_ids`**, a list, instead of `unsearchable_notes`,
+a number. The frontend filters that list through the same `deletedIds` set it
+already filters results through, and counts what is left. **Two lists, one rule** —
+that is fewer ideas on the page than a list and a number that need different
+handling, not more.
+
+`docs/api.md` changed in the same commit, which is what the contract rule asks
+for. Nobody else was building against it: slice 3 is one unmerged branch, which is
+exactly the window where changing a shape is free. After a merge this would have
+been a conversation first.
+
+**99 tests pass**, up from 96. The three new backend tests were run against the
+old code first and fail there — the two width tests with numpy's `ValueError`, and
+the ids test because a count cannot name which note went away.
 
 **The frontend fixes have no tests, and that is a real gap.** There is no test
 runner in `frontend/` at all — `npm run lint` and `npm run build` are the only

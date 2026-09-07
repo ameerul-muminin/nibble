@@ -98,7 +98,7 @@ def test_nothing_uploaded_yet_is_an_empty_list_not_an_error(client):
     response = client.post("/search", json={"query": "osmosis"})
 
     assert response.status_code == 200
-    assert response.json() == {"results": [], "unsearchable_notes": 0}
+    assert response.json() == {"results": [], "unsearchable_note_ids": []}
 
 
 def test_the_matching_note_comes_first_with_everything_the_contract_promises(client):
@@ -151,7 +151,7 @@ def test_a_negative_score_is_reported_as_zero(client, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def _insert_note_with_no_embedding(filename: str = "old.pdf"):
+def _insert_note_with_no_embedding(filename: str = "old.pdf") -> int:
     """Write a document the way slice 2 would have — chunks, but no vectors."""
     from app.db import get_db
 
@@ -161,28 +161,55 @@ def _insert_note_with_no_embedding(filename: str = "old.pdf"):
             "INSERT INTO documents (filename, page_count, created_at) VALUES (?, ?, ?)",
             (filename, 1, "2026-09-01T10:00:00"),
         )
+        document_id = cursor.lastrowid
         db.execute(
             "INSERT INTO chunks (document_id, page, content) VALUES (?, ?, ?)",
-            (cursor.lastrowid, 1, "Osmosis, written down before search existed."),
+            (document_id, 1, "Osmosis, written down before search existed."),
         )
         db.commit()
     finally:
         db.close()
 
+    return document_id
 
-def test_a_note_with_no_embedding_is_skipped_and_counted(client):
+
+def test_a_note_with_no_embedding_is_skipped_and_named(client):
     """The decision in docs/scope.md: skip them, but never silently.
 
-    Without the count this is the failure the project keeps meeting — a note
-    sitting in the list, looking perfectly normal, that no search can ever find.
+    Without this, the failure the project keeps meeting — a note sitting in the
+    list, looking perfectly normal, that no search can ever find.
     """
-    _insert_note_with_no_embedding()
+    old_id = _insert_note_with_no_embedding()
     _upload(client, "new.txt", "Osmosis is the net movement of water across a membrane.")
 
     body = client.post("/search", json={"query": "osmosis"}).json()
 
     assert [r["filename"] for r in body["results"]] == ["new.txt"]
-    assert body["unsearchable_notes"] == 1
+    assert body["unsearchable_note_ids"] == [old_id]
+
+
+def test_the_ids_say_which_notes_not_just_how_many(client):
+    """Why this is a list of ids and not a count.
+
+    The frontend has to reconcile this with deletions: delete one of these notes
+    and a bare number cannot say whether it was one of the ones being counted, so
+    the page either keeps telling somebody to delete a note that is already gone
+    or hides a warning that is still true. Naming them makes that exact.
+    """
+    first = _insert_note_with_no_embedding("old-one.pdf")
+    second = _insert_note_with_no_embedding("old-two.pdf")
+    _upload(client, "new.txt", "Osmosis is the net movement of water across a membrane.")
+
+    body = client.post("/search", json={"query": "osmosis"}).json()
+
+    assert body["unsearchable_note_ids"] == sorted([first, second])
+
+    # And deleting one of them takes it out of the answer, which is the whole
+    # thing the frontend depends on.
+    client.delete(f"/documents/{first}")
+    body = client.post("/search", json={"query": "osmosis"}).json()
+
+    assert body["unsearchable_note_ids"] == [second]
 
 
 def test_a_vector_of_the_wrong_width_is_skipped_and_counted(client):
@@ -222,7 +249,7 @@ def test_a_vector_of_the_wrong_width_is_skipped_and_counted(client):
     assert response.status_code == 200
     body = response.json()
     assert [r["filename"] for r in body["results"]] == ["current.txt"]
-    assert body["unsearchable_notes"] == 1
+    assert len(body["unsearchable_note_ids"]) == 1
 
 
 def test_a_note_counts_once_even_if_it_is_unsearchable_twice_over(client):
@@ -255,7 +282,7 @@ def test_a_note_counts_once_even_if_it_is_unsearchable_twice_over(client):
 
     body = client.post("/search", json={"query": "osmosis"}).json()
 
-    assert body["unsearchable_notes"] == 1
+    assert len(body["unsearchable_note_ids"]) == 1
 
 
 def test_only_old_notes_means_no_results_but_still_a_count(client):
@@ -264,7 +291,7 @@ def test_only_old_notes_means_no_results_but_still_a_count(client):
     body = client.post("/search", json={"query": "osmosis"}).json()
 
     assert body["results"] == []
-    assert body["unsearchable_notes"] == 1
+    assert len(body["unsearchable_note_ids"]) == 1
 
 
 # ---------------------------------------------------------------------------

@@ -134,13 +134,15 @@ export function getChunks(id) {
 /**
  * Slice 3: find the pieces of your notes closest in meaning to some text.
  *
- * Returns { results, unsearchable_notes }. Each result is
+ * Returns { results, unsearchable_note_ids }. Each result is
  * { document_id, filename, page, content, score }, best match first, and
  * `score` runs 0 to 1. An empty `results` is a real answer: nothing came close.
  *
- * `unsearchable_notes` counts notes stored before search existed, which have no
- * embedding and can never match anything. The UI says so when it is not zero —
- * a note that silently never matches is worse than one that says why.
+ * `unsearchable_note_ids` names the notes that can never match anything — either
+ * stored before search existed, or embedded by a different model. The UI shows
+ * how many there are, because a note that silently never matches is worse than
+ * one that says why. They are ids rather than a count so that deleting one can
+ * be reflected exactly, the same way it is for results.
  *
  * Note the Content-Type header, which uploadDocument above deliberately does
  * NOT set. The difference is real: a file upload is multipart and the browser
