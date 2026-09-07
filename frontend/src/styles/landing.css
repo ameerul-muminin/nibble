@@ -1,0 +1,188 @@
+/* Landing page. Tokens only — no raw colours, sizes from var(--gap-*). */
+
+.landing {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: var(--gap-xl) var(--gap-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-lg);
+}
+
+.landing-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap);
+}
+
+.landing-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+}
+
+.landing-word {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 28px;
+}
+
+.landing-nav-actions {
+  display: flex;
+  gap: var(--gap-sm);
+}
+
+.landing-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-lg);
+}
+
+.landing-hero {
+  display: flex;
+  gap: var(--gap-lg);
+  align-items: center;
+}
+
+.landing-hero-mascot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--gap-sm);
+  flex-shrink: 0;
+}
+
+.landing-hero-copy h1 {
+  font-size: 40px;
+  margin-bottom: var(--gap-sm);
+}
+
+.landing-sub {
+  margin: 0 0 var(--gap) 0;
+  color: var(--text-muted);
+  font-size: 18px;
+}
+
+.landing-cta {
+  display: flex;
+  gap: var(--gap-sm);
+  flex-wrap: wrap;
+}
+
+.landing-cta-big {
+  font-size: 18px;
+  padding: 14px 28px;
+}
+
+.landing-micro {
+  margin: var(--gap-sm) 0 0 0;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.landing-steps {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--gap);
+}
+
+.landing-step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+}
+
+.landing-step h2 {
+  font-size: 20px;
+}
+
+.landing-step p {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.landing-step-n {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 20px;
+  background: var(--lime);
+  border: var(--border);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--lift);
+}
+
+.landing-demo h2 {
+  margin-bottom: var(--gap);
+}
+
+.landing-chat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+}
+
+.landing-cat-row {
+  display: flex;
+  gap: var(--gap-sm);
+  align-items: flex-start;
+}
+
+.landing-cat-row .bubble {
+  margin: 0;
+}
+
+.landing-trust {
+  display: flex;
+  gap: var(--gap-sm);
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.landing-foot {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+@media (max-width: 720px) {
+  .landing-hero {
+    flex-direction: column;
+    text-align: center;
+  }
+
+  .landing-hero-copy h1 {
+    font-size: 32px;
+  }
+
+  .landing-cta {
+    justify-content: center;
+  }
+
+  .landing-steps {
+    grid-template-columns: 1fr;
+  }
+
+  .landing-nav-actions .btn {
+    padding: 10px 14px;
+  }
+}
+
+/* The waving mascot. Height is set and width follows, so the SVG keeps its
+   356x408 shape instead of being squashed to fit a box. */
+.landing-hero-art {
+  height: 200px;
+  width: auto;
+  display: block;
+}
+
+.landing-chat-art {
+  height: 48px;
+  width: auto;
+  flex-shrink: 0;
+}

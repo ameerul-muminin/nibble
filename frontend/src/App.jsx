@@ -10,9 +10,9 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { Show, SignInButton, SignUpButton, UserButton } from '@clerk/react'
+import { useAuth, UserButton } from '@clerk/react'
 import { deleteDocument, getChunks, getHealth, listDocuments, uploadDocument } from './api'
-import { Mascot } from './components/Mascot'
+import { Landing } from './components/Landing'
 import './styles/global.css'
 
 // What we say for each state. Errors tell you what to DO, never just "error".
@@ -23,6 +23,12 @@ const MESSAGES = {
 }
 
 export default function App() {
+  // Who is looking at this? isLoaded is false for the first moment, while Clerk
+  // checks the browser for an existing session. Both flags matter: <Show> was
+  // used here before and it renders NOTHING while loading, which is invisible
+  // when it wraps one button and a blank white page when it wraps the whole app.
+  const { isLoaded, isSignedIn } = useAuth()
+
   // useState remembers a value between redraws. Calling setStatus tells React
   // the value changed, and React redraws whatever uses it.
   const [status, setStatus] = useState('checking')
@@ -236,6 +242,21 @@ export default function App() {
     }
   }
 
+  // Clerk has not answered yet. Say so, rather than drawing a blank page that
+  // looks broken. It is normally too fast to read.
+  if (!isLoaded) {
+    return (
+      <main style={{ maxWidth: 620, margin: '0 auto', padding: 'var(--gap-xl) var(--gap-lg)' }}>
+        <p style={{ color: 'var(--text-muted)' }}>Waking Nibble up…</p>
+      </main>
+    )
+  }
+
+  // Signed-out visitors get the landing page and nothing else.
+  if (!isSignedIn) {
+    return <Landing />
+  }
+
   return (
     <main style={{ maxWidth: 620, margin: '0 auto', padding: 'var(--gap-xl) var(--gap-lg)' }}>
       <header
@@ -246,7 +267,6 @@ export default function App() {
           marginBottom: 'var(--gap-lg)',
         }}
       >
-        <Mascot size={80} mood={status === 'checking' ? 'thinking' : 'idle'} />
         <div>
           <h1>Nibble</h1>
           <p style={{ margin: 0, color: 'var(--text-muted)' }}>
@@ -254,19 +274,9 @@ export default function App() {
           </p>
         </div>
 
-        {/*
-          Show picks one branch based on whether somebody is signed in. Clerk
-          knows the answer because ClerkProvider wraps the whole app in main.jsx.
-          marginLeft: 'auto' pushes this cluster to the right-hand end of the row.
-        */}
+        {/* Already inside signed-in, so just the user menu. */}
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 'var(--gap-sm)' }}>
-          <Show when="signed-out">
-            <SignInButton mode="modal" />
-            <SignUpButton mode="modal" />
-          </Show>
-          <Show when="signed-in">
-            <UserButton />
-          </Show>
+          <UserButton />
         </div>
       </header>
 
