@@ -1006,11 +1006,42 @@ pre-slice-3 notes:
   "cells". **"diffusion" → 0.684**, and the note never says that either. **"recipe
   for banana bread" → 0.449.** That spread is the demo.
 
-**Still not verified: the browser.** Lint and the production build are clean and
-every backend call above was made against the real server, but no person has typed
-into the search box and looked at the result. Same open item as slice 2, and it is
-still a person's job. The dev database now has one searchable note in it, so that
-check takes about a minute.
+### The browser check happened, and it earned its place
+
+Somebody typed "How does osmosis work?" into the box and got **"Not Found"** in
+coral. Two separate things were wrong, and only one of them was a bug.
+
+**The cause was a stale backend, not the code.** The `uvicorn` running on port 8000
+had been started before slice 3 existed, so it served `/health` happily and had no
+`/search` at all. Confirmed by asking it directly: `GET /health` → 200,
+`POST /search` → 404. Restarting it fixes the search. Nothing on this branch was
+wrong.
+
+**The bug was that the screen said "Not Found".** Those are FastAPI's words, not
+ours, and [`CLAUDE.md`](../CLAUDE.md) says a person never sees a raw error — a plain
+sentence and a way to try again. `api.js` trusted `detail` from any failed response,
+which is right for the sentences our own routes write and wrong for the two kinds of
+failure the framework generates:
+
+- **404 "Not Found"** means the backend has no route at that address, which is never
+  the user's doing. It means the two halves of the app disagree about what exists —
+  almost always a backend running older code, which is precisely what this was.
+- **422** carries a *list of objects* in `detail`, not a string, so
+  `new Error(thatList)` would have put "[object Object]" on screen. Latent, and one
+  malformed request away from being seen.
+
+Now both get a written sentence, and the 404 one names the fix: restart the backend
+with `uvicorn app.main:app --reload`. **The error message went from a fact nobody can
+act on to the actual diagnosis** — which is the whole point of the rule.
+
+**This is the argument for clicking things, in one screenshot.** 96 tests, a clean
+production build, and every endpoint verified against a real server, and the first
+thing a person saw was a red error. No test could have caught it: the tests run
+against the code as it is now, and the failure was a *running process* that was not.
+
+**Still not verified: a successful search in the browser.** The stale server needs
+restarting first, and then it takes a minute — there is one searchable note in the
+dev database ready for it.
 
 ## Slice 4: Nibble answers
 
