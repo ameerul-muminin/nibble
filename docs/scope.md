@@ -1006,6 +1006,52 @@ pre-slice-3 notes:
   "cells". **"diffusion" → 0.684**, and the note never says that either. **"recipe
   for banana bread" → 0.449.** That spread is the demo.
 
+### Reviewed after building — three findings, all three valid
+
+Worth noticing as a set: **each one is a snapshot going stale**, in a different
+place. Nothing here is about the maths or the model.
+
+**1. A slow search overwrites a newer one.** Two searches in flight, the older
+answer lands last, and the screen shows results and a heading for a question
+nobody is asking any more. **Not reachable today** — the Search button is disabled
+while a search runs, and a disabled default button also stops the Enter key
+submitting. Fixed anyway, matching what slice 2 did with the stale selection: a
+`searchRun` counter in a ref, and an answer that is not the newest is dropped.
+The ref is the same idea as the `ignore` flag on the effects nearby, in the shape
+an event handler needs — an effect gets a cleanup function to mark itself stale
+and a click handler does not.
+
+**2. A finished search puts a deleted note back on screen.** `handleDelete`
+filtered the results, but a search already in the air would arrive afterwards
+carrying that note and replace the filtered list. **This one is reachable right
+now:** start a search, click × on a note, wait. Delete buttons are not disabled
+during a search, and nothing else clears results, so the note's pieces would sit
+there under a filename that no longer exists. Fixed with a `deletedIds` ref that
+arriving results are filtered through.
+
+**3. A stored vector of the wrong width crashes every search.** Change
+`EMBEDDING_MODEL` and `EMBEDDING_DIM` together — the realistic upgrade — and
+everything already stored is the old width. Comparing a 384-number query to a
+768-number piece is not a weak match, it is a numpy `ValueError`, which is a 500
+and a traceback on **every search** until somebody works out which rows to delete.
+Verified by removing the guard and watching two tests fail exactly that way.
+
+Fixed by treating a wrong-width vector as **unsearchable**, not as an error. That
+reuses a concept that already exists rather than adding a new failure path, and
+the remedy the UI already names — delete the note and upload it again — is the
+right remedy here too. The two kinds of unsearchable note are found in different
+places, one in SQL and one in Python, so they are collected as a **set of ids** and
+counted at the end; adding two counts would report one note twice.
+
+**98 tests pass**, up from 96. Both new backend tests were run against the
+unguarded code first and fail there.
+
+**The frontend fixes have no tests, and that is a real gap.** There is no test
+runner in `frontend/` at all — `npm run lint` and `npm run build` are the only
+automated checks, and neither can see a race. Both fixes are reasoned and read
+carefully; neither is proven. Worth an issue of its own rather than pretending
+otherwise.
+
 ### The browser check happened, and it earned its place
 
 Somebody typed "How does osmosis work?" into the box and got **"Not Found"** in

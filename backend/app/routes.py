@@ -463,19 +463,51 @@ def search(request: SearchRequest):
         # never match anything, sitting in the list looking perfectly normal, is
         # the failure this project keeps having. Counting them lets the frontend
         # say so in a sentence instead.
-        unsearchable_notes = db.execute(
-            "SELECT COUNT(DISTINCT document_id) FROM chunks WHERE embedding IS NULL"
-        ).fetchone()[0]
+        #
+        # The ids rather than a COUNT, because a second kind of unsearchable
+        # note is found below and the two sets have to be added together without
+        # counting the same note twice.
+        unsearchable_ids = {
+            row["document_id"]
+            for row in db.execute(
+                "SELECT DISTINCT document_id FROM chunks WHERE embedding IS NULL"
+            ).fetchall()
+        }
     finally:
         db.close()
 
-    # No pieces to compare against is an ordinary state — a fresh install, or a
-    # database holding only pre-slice-3 notes. An empty list is a real answer.
+    # Every stored vector, back from JSON text into numbers.
+    #
+    # A vector of the wrong width is skipped here, and its note joins the
+    # unsearchable count. This happens if EMBEDDING_MODEL and EMBEDDING_DIM are
+    # ever changed: everything stored before the change was embedded at the old
+    # width, and comparing a 384-number query against a 768-number piece is not
+    # a close match or a distant one, it is a numpy shape error — a 500 with a
+    # traceback, for every search, until somebody works out why.
+    #
+    # Treating it as "cannot be searched" rather than as an error reuses a
+    # concept that already exists instead of adding a new one, and the fix the
+    # UI already names is the right fix here too: delete the note and upload it
+    # again.
+    matrix = []
+    comparable = []
+    for row in rows:
+        vector = json.loads(row["embedding"])
+        if len(vector) != len(query_vector):
+            unsearchable_ids.add(row["document_id"])
+            continue
+        matrix.append(vector)
+        comparable.append(row)
+
+    rows = comparable
+    unsearchable_notes = len(unsearchable_ids)
+
+    # No pieces to compare against is an ordinary state — a fresh install, a
+    # database holding only pre-slice-3 notes, or one where every stored vector
+    # was made by a different model. An empty list is a real answer.
     if not rows:
         return {"results": [], "unsearchable_notes": unsearchable_notes}
 
-    # Every stored vector, back from JSON text into numbers, in one list.
-    matrix = [json.loads(row["embedding"]) for row in rows]
     scores = cosine_similarity(query_vector, matrix)
 
     # argsort gives the positions that would sort the scores from low to high,

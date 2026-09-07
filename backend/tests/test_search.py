@@ -185,6 +185,79 @@ def test_a_note_with_no_embedding_is_skipped_and_counted(client):
     assert body["unsearchable_notes"] == 1
 
 
+def test_a_vector_of_the_wrong_width_is_skipped_and_counted(client):
+    """What happens after somebody changes EMBEDDING_MODEL.
+
+    Everything stored before the change was embedded at the old width. Comparing
+    a 3-number query against a 5-number piece is not a weak match — it is a numpy
+    shape error, which without this guard is a 500 and a traceback on every
+    search until the old rows are found and removed.
+
+    It counts as unsearchable rather than as an error, because that is exactly
+    what it is, and the UI already tells people what to do about that: delete the
+    note and upload it again.
+    """
+    from app.db import get_db
+
+    _upload(client, "current.txt", "Osmosis is the net movement of water across a membrane.")
+
+    # A note from "before the model changed" — five numbers where the rest of the
+    # database has three.
+    db = get_db()
+    try:
+        cursor = db.execute(
+            "INSERT INTO documents (filename, page_count, created_at) VALUES (?, ?, ?)",
+            ("old-model.txt", 1, "2026-09-01T10:00:00"),
+        )
+        db.execute(
+            "INSERT INTO chunks (document_id, page, content, embedding) VALUES (?, ?, ?, ?)",
+            (cursor.lastrowid, 1, "Osmosis, embedded by a different model.", json.dumps([1.0] * 5)),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.post("/search", json={"query": "osmosis"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [r["filename"] for r in body["results"]] == ["current.txt"]
+    assert body["unsearchable_notes"] == 1
+
+
+def test_a_note_counts_once_even_if_it_is_unsearchable_twice_over(client):
+    """One note with a NULL piece and a wrong-width piece is one note, not two.
+
+    The two skips are found in different places — one in SQL, one in Python —
+    so they are collected as a set of ids and counted at the end rather than
+    added up as they are found.
+    """
+    from app.db import get_db
+
+    db = get_db()
+    try:
+        cursor = db.execute(
+            "INSERT INTO documents (filename, page_count, created_at) VALUES (?, ?, ?)",
+            ("mixed.txt", 2, "2026-09-01T10:00:00"),
+        )
+        document_id = cursor.lastrowid
+        db.execute(
+            "INSERT INTO chunks (document_id, page, content) VALUES (?, ?, ?)",
+            (document_id, 1, "A piece with no vector at all."),
+        )
+        db.execute(
+            "INSERT INTO chunks (document_id, page, content, embedding) VALUES (?, ?, ?, ?)",
+            (document_id, 2, "A piece from another model.", json.dumps([1.0] * 5)),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    body = client.post("/search", json={"query": "osmosis"}).json()
+
+    assert body["unsearchable_notes"] == 1
+
+
 def test_only_old_notes_means_no_results_but_still_a_count(client):
     _insert_note_with_no_embedding()
 

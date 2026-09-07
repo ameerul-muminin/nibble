@@ -201,6 +201,26 @@ export default function App() {
   // said out loud rather than left to be discovered during a demo.
   const [unsearchable, setUnsearchable] = useState(0)
 
+  // Which search is the newest one. Every search takes the next number, and an
+  // answer is only allowed to write to the screen if its number is still the
+  // current one.
+  //
+  // This is the same idea as the `ignore` flag on the two effects above, in the
+  // shape an event handler needs: an effect gets a cleanup function to mark the
+  // old run stale, and a click handler does not, so the marker has to live
+  // somewhere that survives between calls. A ref does; a normal variable would
+  // be created fresh on every render.
+  //
+  // Not reachable through the UI today, because the Search button is disabled
+  // while a search is in flight and that stops the Enter key submitting too.
+  // Written anyway: it is one line of bookkeeping, and "the answer to the
+  // question you asked two questions ago silently replaces the one on screen"
+  // is a horrible bug to meet for the first time in front of an audience.
+  const searchRun = useRef(0)
+
+  // Notes deleted while a search was in the air. See handleSearch below.
+  const deletedIds = useRef(new Set())
+
   /**
    * #14 — runs when the search form is submitted.
    *
@@ -216,17 +236,34 @@ export default function App() {
     const trimmed = query.trim()
     if (!trimmed) return
 
+    const run = searchRun.current + 1
+    searchRun.current = run
+
     setSearchStatus('searching')
     setSearchError(null)
 
     try {
       const body = await search(trimmed)
 
-      setResults(body.results)
+      // A newer search started while this one was still out. Its answer is the
+      // one that belongs on screen, so drop this one on the floor.
+      if (searchRun.current !== run) return
+
+      // Results are a snapshot of the moment the request was sent, and a note
+      // can be deleted while it is in the air — the delete button stays live
+      // during a search. Without this filter, the arriving results would put a
+      // deleted note's pieces back on screen, under a filename that no longer
+      // exists, and nothing would clear them until the next search.
+      //
+      // Unlike the stale-response guard above, this one is reachable right now:
+      // start a search, click × on a note, and the results land after it.
+      setResults(body.results.filter((result) => !deletedIds.current.has(result.document_id)))
       setUnsearchable(body.unsearchable_notes)
       setSearched(trimmed)
       setSearchStatus('ready')
     } catch (error) {
+      if (searchRun.current !== run) return
+
       // The backend writes a plain sentence for anything a person caused. Show
       // that, and keep a generic line only for when there was nothing to show.
       setSearchError(error.message || 'Nibble could not search just now. Try again in a moment.')
@@ -306,6 +343,12 @@ export default function App() {
       // clear them — the pieces of a deleted note would sit there under a
       // filename that no longer exists until somebody searched again.
       setResults((current) => current.filter((result) => result.document_id !== id))
+
+      // Clearing the results on screen is not enough on its own: a search that
+      // was already in the air will arrive afterwards carrying this note, and
+      // put it straight back. Remembering the id is what lets handleSearch
+      // filter it out when that answer lands.
+      deletedIds.current.add(id)
     } catch {
       setNotice('Could not delete that note. Try again in a moment.')
     }
