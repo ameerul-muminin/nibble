@@ -12,6 +12,45 @@
 // while developing.
 const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
+// FastAPI's own words when there is no route at that address at all, and when
+// the method is wrong. They are written for a developer reading a log, not for
+// a person using the app — see the comment in messageFor below.
+const FRAMEWORK_DEFAULTS = ['Not Found', 'Method Not Allowed']
+
+/**
+ * Turn a failed response into one sentence worth showing somebody.
+ *
+ * Our own routes write a plain sentence into `detail` for anything a person
+ * caused — the wrong file type, a scan too long to read, a blank search box.
+ * Those are the best thing to show, and they are shown unchanged.
+ *
+ * Two kinds of failure do NOT come from our routes, and both were showing the
+ * framework's words straight to the user:
+ *
+ * - **404 "Not Found"** means the backend has no route at that address. That is
+ *   never the user's doing. It means the two halves of the app disagree about
+ *   what exists — almost always a backend still running older code, which is
+ *   exactly what happened the first time the search box was used in a browser.
+ * - **422** is FastAPI rejecting the shape of the body, and its `detail` is a
+ *   *list of objects*, not a string. `new Error(thatList)` produces
+ *   "[object Object]" on screen, which tells nobody anything.
+ */
+function messageFor(status, detail) {
+  if (typeof detail === 'string' && detail && !FRAMEWORK_DEFAULTS.includes(detail)) {
+    return detail
+  }
+
+  if (status === 404 || status === 405) {
+    return 'Nibble’s backend doesn’t know about that yet. It’s probably running an older version — stop it and start it again with: uvicorn app.main:app --reload'
+  }
+
+  if (status === 422) {
+    return 'Nibble’s backend didn’t understand that request. If you just updated it, restart it and try again.'
+  }
+
+  return `Nibble’s backend answered with ${status}. Try again in a moment.`
+}
+
 /**
  * A small wrapper around fetch that does the boring bits: build the full URL,
  * turn a failure into a real error, and hand back the parsed JSON.
@@ -20,16 +59,14 @@ async function request(path, options) {
   const response = await fetch(`${BASE}${path}`, options)
 
   if (!response.ok) {
-    // The backend writes a plain sentence into `detail` for anything a person
-    // caused — wrong file type, a scan it cannot read, the daily limit gone.
-    // Prefer that over a status code, which tells somebody nothing.
     let detail = null
     try {
       detail = (await response.json()).detail
     } catch {
+      // Not every failure has a JSON body — a crashed server sends none at all.
       detail = null
     }
-    throw new Error(detail || `The backend answered with ${response.status}`)
+    throw new Error(messageFor(response.status, detail))
   }
 
   // 204 means "done, nothing to send back" — there is no JSON to read.
@@ -92,4 +129,31 @@ export function deleteDocument(id) {
  */
 export function getChunks(id) {
   return request(`/documents/${id}/chunks`)
+}
+
+/**
+ * Slice 3: find the pieces of your notes closest in meaning to some text.
+ *
+ * Returns { results, unsearchable_note_ids }. Each result is
+ * { document_id, filename, page, content, score }, best match first, and
+ * `score` runs 0 to 1. An empty `results` is a real answer: nothing came close.
+ *
+ * `unsearchable_note_ids` names the notes that can never match anything — either
+ * stored before search existed, or embedded by a different model. The UI shows
+ * how many there are, because a note that silently never matches is worse than
+ * one that says why. They are ids rather than a count so that deleting one can
+ * be reflected exactly, the same way it is for results.
+ *
+ * Note the Content-Type header, which uploadDocument above deliberately does
+ * NOT set. The difference is real: a file upload is multipart and the browser
+ * has to write that header itself, because only it knows the boundary string.
+ * This is plain JSON, so we say so, and FastAPI reads the body as the
+ * SearchRequest model in routes.py.
+ */
+export function search(query) {
+  return request('/search', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query }),
+  })
 }

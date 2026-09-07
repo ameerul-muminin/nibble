@@ -11,7 +11,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useAuth, UserButton } from '@clerk/react'
-import { deleteDocument, getChunks, getHealth, listDocuments, uploadDocument } from './api'
+import { deleteDocument, getChunks, getHealth, listDocuments, search, uploadDocument } from './api'
 import { Landing } from './components/Landing'
 import './styles/global.css'
 
@@ -177,6 +177,124 @@ export default function App() {
     setSelectedId((current) => (current === id ? null : id))
   }
 
+  // -------------------------------------------------------------------------
+  // Slice 3 — issue #14. Type a question, see the pieces that match it.
+  // -------------------------------------------------------------------------
+
+  // What is in the box right now. A "controlled input": React holds the value
+  // and the input just displays it, which is why onChange has to write it back
+  // — leave that out and typing appears to do nothing.
+  const [query, setQuery] = useState('')
+
+  // The query that produced the results currently on screen. Kept separately
+  // from `query` on purpose: the heading should keep saying what was actually
+  // searched for while somebody types their next question over the top of it.
+  const [searched, setSearched] = useState('')
+
+  const [results, setResults] = useState([])
+  const [searchStatus, setSearchStatus] = useState('idle') // idle | searching | ready | failed
+  const [searchError, setSearchError] = useState(null)
+
+  // Which notes cannot be searched at all, by id, straight from the backend.
+  // These are notes stored before slice 3 existed, which have no embedding —
+  // they sit in the list looking perfectly normal and match nothing, so they get
+  // said out loud rather than left to be discovered during a demo.
+  //
+  // Ids rather than the count, because a count cannot survive a deletion: delete
+  // one of these notes and a number cannot tell you whether it was one of the
+  // ones being counted, so the page would keep telling you to delete a note that
+  // is already gone. A list can be filtered, exactly like the results are, and
+  // the number shown is counted from what is left.
+  const [unsearchableIds, setUnsearchableIds] = useState([])
+  const unsearchable = unsearchableIds.length
+
+  // Which search is the newest one. Every search takes the next number, and an
+  // answer is only allowed to write to the screen if its number is still the
+  // current one.
+  //
+  // This is the same idea as the `ignore` flag on the two effects above, in the
+  // shape an event handler needs: an effect gets a cleanup function to mark the
+  // old run stale, and a click handler does not, so the marker has to live
+  // somewhere that survives between calls. A ref does; a normal variable would
+  // be created fresh on every render.
+  //
+  // Not reachable through the UI today, because the Search button is disabled
+  // while a search is in flight and that stops the Enter key submitting too.
+  // Written anyway: it is one line of bookkeeping, and "the answer to the
+  // question you asked two questions ago silently replaces the one on screen"
+  // is a horrible bug to meet for the first time in front of an audience.
+  const searchRun = useRef(0)
+
+  // Notes deleted while a search was in the air. See handleSearch below.
+  const deletedIds = useRef(new Set())
+
+  /**
+   * #14 — runs when the search form is submitted.
+   *
+   * A <form> with onSubmit rather than a button with onClick, because that is
+   * what makes the Enter key work, and typing a question and pressing Enter is
+   * how everybody expects a search box to behave.
+   */
+  async function handleSearch(event) {
+    // Without this the browser reloads the whole page on submit — its default
+    // behaviour since forms predate JavaScript.
+    event.preventDefault()
+
+    const trimmed = query.trim()
+    if (!trimmed) return
+
+    const run = searchRun.current + 1
+    searchRun.current = run
+
+    setSearchStatus('searching')
+    setSearchError(null)
+
+    try {
+      const body = await search(trimmed)
+
+      // A newer search started while this one was still out. Its answer is the
+      // one that belongs on screen, so drop this one on the floor.
+      if (searchRun.current !== run) return
+
+      // Results are a snapshot of the moment the request was sent, and a note
+      // can be deleted while it is in the air — the delete button stays live
+      // during a search. Without this filter, the arriving results would put a
+      // deleted note's pieces back on screen, under a filename that no longer
+      // exists, and nothing would clear them until the next search.
+      //
+      // Unlike the stale-response guard above, this one is reachable right now:
+      // start a search, click × on a note, and the results land after it.
+      // Both lists go through the same filter, for the same reason. A note
+      // deleted while this request was in the air is gone, whether it was one
+      // of the matches or one of the notes that could never be matched.
+      const notDeleted = (id) => !deletedIds.current.has(id)
+
+      setResults(body.results.filter((result) => notDeleted(result.document_id)))
+
+      // ?? [] because a backend older than this page does not send this field,
+      // and reaching for .filter on nothing is a TypeError — which would land in
+      // the catch below and put a raw JavaScript error on screen. That is the
+      // stale-backend problem again, and the same rule applies: the two halves
+      // of the app disagreeing must never look like a crash. Search still works
+      // here; only the notice about unsearchable notes goes quiet.
+      setUnsearchableIds((body.unsearchable_note_ids ?? []).filter(notDeleted))
+      setSearched(trimmed)
+      setSearchStatus('ready')
+    } catch (error) {
+      if (searchRun.current !== run) return
+
+      // The backend writes a plain sentence for anything a person caused. Show
+      // that, and keep a generic line only for when there was nothing to show.
+      setSearchError(error.message || 'Nibble could not search just now. Try again in a moment.')
+      setSearchStatus('failed')
+    }
+  }
+
+  /** 0.82 -> "82%". A percentage is far easier to read at a glance than 0.82. */
+  function asPercentage(score) {
+    return `${Math.round(score * 100)}%`
+  }
+
   /** #5 — runs when a file has been chosen in the hidden input. */
   async function handleFileChosen(event) {
     const file = event.target.files[0]
@@ -237,6 +355,26 @@ export default function App() {
       // Without this the pieces of a note that no longer exists stay on screen,
       // and the next reload would ask the backend for it and get a 404.
       setSelectedId((current) => (current === id ? null : current))
+
+      // Same reasoning for the search results, which are a second place a
+      // deleted note can keep being shown. Search results are a snapshot of the
+      // moment they were fetched, not live data, so nothing else would ever
+      // clear them — the pieces of a deleted note would sit there under a
+      // filename that no longer exists until somebody searched again.
+      setResults((current) => current.filter((result) => result.document_id !== id))
+
+      // And the same for the notes-that-cannot-be-searched notice, which is the
+      // other thing on screen naming a document. Without this, deleting exactly
+      // the note that notice is about leaves it saying "1 note was added before
+      // search existed — delete it and upload again" about a note that is no
+      // longer there. That one needs no race at all to see.
+      setUnsearchableIds((current) => current.filter((noteId) => noteId !== id))
+
+      // Clearing what is on screen is not enough on its own: a search that was
+      // already in the air will arrive afterwards carrying this note, in either
+      // list, and put it straight back. Remembering the id is what lets
+      // handleSearch filter it out when that answer lands.
+      deletedIds.current.add(id)
     } catch {
       setNotice('Could not delete that note. Try again in a moment.')
     }
@@ -290,6 +428,140 @@ export default function App() {
             ? 'Next up: Slice 1, uploading a PDF.'
             : 'This page asks the backend for /health when it loads.'}
         </p>
+      </section>
+
+      {/*
+        Slice 3 — issue #14. Search, with no AI anywhere in it.
+
+        Sits directly above the notes list, because that is what it searches.
+        Everything on screen here comes from cosine similarity and nothing else:
+        no model wrote a word of it, which is exactly what makes this slice worth
+        demoing on its own.
+      */}
+      <section className="card" style={{ marginTop: 'var(--gap-lg)' }}>
+        <h2 style={{ marginBottom: 'var(--gap-sm)' }}>Search your notes</h2>
+
+        <p style={{ marginTop: 0, color: 'var(--text-muted)' }}>
+          Ask in your own words. Nibble matches meaning, not spelling, so “how does water
+          cross a membrane” finds the page about osmosis.
+        </p>
+
+        <form onSubmit={handleSearch} style={{ display: 'flex', gap: 'var(--gap-sm)' }}>
+          {/*
+            A real <label>, hidden from sight but not from a screen reader. A
+            placeholder is not a label: it disappears the moment you type, and
+            some screen readers never announce it at all.
+          */}
+          <label htmlFor="search-box" className="visually-hidden">
+            What do you want to find?
+          </label>
+
+          <input
+            id="search-box"
+            className="input"
+            type="search"
+            placeholder="How does osmosis work?"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+
+          <button
+            type="submit"
+            className="btn btn--primary"
+            disabled={searchStatus === 'searching' || !query.trim()}
+          >
+            {searchStatus === 'searching' ? 'Looking…' : 'Search'}
+          </button>
+        </form>
+
+        {/*
+          role="status" tells a screen reader to announce this when it changes,
+          without stealing focus — which is how somebody who cannot see the page
+          finds out the search finished.
+        */}
+        <div role="status">
+          {searchStatus === 'searching' && (
+            <p style={{ color: 'var(--text-muted)' }}>Reading through your notes…</p>
+          )}
+
+          {searchStatus === 'failed' && (
+            <p style={{ color: 'var(--coral)' }}>{searchError}</p>
+          )}
+
+          {searchStatus === 'ready' && results.length === 0 && (
+            <p style={{ color: 'var(--text-muted)', marginBottom: 0 }}>
+              Nothing in your notes came close to “{searched}”. Try different words, or add
+              the chapter it should be in.
+            </p>
+          )}
+        </div>
+
+        {/*
+          The count of notes that cannot be searched. Shown whenever it is not
+          zero, and only underneath a search, so it explains a disappointing
+          result at the moment somebody is looking at one.
+        */}
+        {searchStatus === 'ready' && unsearchable > 0 && (
+          <p style={{ color: 'var(--text-muted)' }}>
+            {unsearchable} {unsearchable === 1 ? 'note was' : 'notes were'} added before search
+            existed, so {unsearchable === 1 ? 'it cannot' : 'they cannot'} be found here. Delete{' '}
+            {unsearchable === 1 ? 'it' : 'them'} and upload again to fix that.
+          </p>
+        )}
+
+        {searchStatus === 'ready' && results.length > 0 && (
+          <>
+            <p style={{ color: 'var(--text-muted)' }}>
+              {results.length} {results.length === 1 ? 'piece' : 'pieces'} for “{searched}”, closest
+              first.
+            </p>
+
+            <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+              {results.map((result) => (
+                <li
+                  // Two pieces of the same note can both come back, so the id
+                  // of the document is not unique enough to be a key on its
+                  // own. Document plus page plus the first few characters is.
+                  key={`${result.document_id}-${result.page}-${result.content.slice(0, 24)}`}
+                  style={{
+                    border: 'var(--border)',
+                    borderRadius: 'var(--radius)',
+                    padding: 'var(--gap-sm)',
+                    marginBottom: 'var(--gap-sm)',
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 'var(--gap-sm)',
+                      marginBottom: 'var(--gap-sm)',
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <span className="source-chip">
+                      {result.filename} · p. {result.page}
+                    </span>
+
+                    {/*
+                      The score as a percentage. This is the most convincing
+                      thing on the screen at a demo: it shows the system is
+                      ranking rather than guessing. Worth knowing that the floor
+                      is not zero — total nonsense still scores about 46%,
+                      because two pieces of ordinary English are never truly
+                      unrelated. A good match is far higher.
+                    */}
+                    <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-display)' }}>
+                      {asPercentage(result.score)} match
+                    </span>
+                  </div>
+
+                  <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{result.content}</p>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
       </section>
 
       {/*

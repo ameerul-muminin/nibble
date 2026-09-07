@@ -16,14 +16,17 @@ the route just calls it. It keeps this file readable and makes the logic
 testable without starting a server.
 """
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
 from fastapi import APIRouter, HTTPException, UploadFile, status
+from pydantic import BaseModel
 
 from app import config, ocr
 from app.chunking import chunk_pages
 from app.db import get_db
+from app.embeddings import EmbeddingUnavailable, cosine_similarity, embed_texts
 from app.files import IMAGE_EXTENSIONS, extract_text, has_no_text
 
 router = APIRouter()
@@ -196,6 +199,24 @@ async def upload_document(file: UploadFile):
             ),
         )
 
+    # --- Turn every piece into numbers ------------------------------------
+    # One call with every piece, not one call per piece. The model is far
+    # faster on a batch, and a 31-page chapter is the difference between a
+    # pause and a wait.
+    #
+    # This happens BEFORE anything is written, on purpose. If it fails, the
+    # upload fails and nothing is stored — because a document whose pieces have
+    # no vectors is a note that sits in the list and never matches a search,
+    # which is the same silent failure reading handwriting and chunking both
+    # exist to remove.
+    try:
+        vectors = embed_texts([chunk["content"] for chunk in chunks])
+    except EmbeddingUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Nibble couldn't get that note ready to search. {exc}",
+        ) from exc
+
     # --- Save the file to disk --------------------------------------------
     _UPLOADS_DIR.mkdir(exist_ok=True)
     (Path(_UPLOADS_DIR) / filename).write_bytes(data)  # filename is already cleaned above
@@ -213,11 +234,20 @@ async def upload_document(file: UploadFile):
         # executemany runs one statement over many rows, instead of a Python
         # loop calling execute() a few hundred times. Same result, one trip.
         #
-        # `embedding` is deliberately not set: the column exists from slice 1
-        # and stays NULL until slice 3 fills it in.
+        # `embedding` is filled in from slice 3 onwards. SQLite has no array
+        # type, so the 384 numbers go in as a JSON string — json.dumps here,
+        # json.loads in /search, and that is the whole conversion.
+        #
+        # zip pairs each chunk with its vector. They line up because embed_texts
+        # returns its answers in the order it was given them; that guarantee is
+        # in its docstring and pinned by a test, and it is the only reason this
+        # line is safe.
         db.executemany(
-            "INSERT INTO chunks (document_id, page, content) VALUES (?, ?, ?)",
-            [(doc_id, c["page"], c["content"]) for c in chunks],
+            "INSERT INTO chunks (document_id, page, content, embedding) VALUES (?, ?, ?, ?)",
+            [
+                (doc_id, chunk["page"], chunk["content"], json.dumps(vector))
+                for chunk, vector in zip(chunks, vectors, strict=True)
+            ],
         )
 
         # One commit for both statements, on purpose. Committing the document
@@ -357,3 +387,157 @@ def list_chunks(document_id: int):
         db.close()
 
     return [{"id": row["id"], "page": row["page"], "content": row["content"]} for row in rows]
+
+
+# ---------------------------------------------------------------------------
+# Slice 3 — Search, with no AI anywhere in it
+# ---------------------------------------------------------------------------
+
+
+class SearchRequest(BaseModel):
+    """The body of a POST /search request: {"query": "how does osmosis work"}.
+
+    This is the first request body in the project, and it is the first time
+    Pydantic does any work for us. Everything before this took a file or an id
+    out of the URL. Declaring the shape as a class means FastAPI reads the JSON,
+    checks it has a `query` that is a string, and rejects anything else with a
+    422 before this code runs — the same way `document_id: int` rejects
+    /documents/abc.
+    """
+
+    query: str
+
+
+@router.post("/search")
+def search(request: SearchRequest):
+    """Find the pieces of your notes that mean the closest thing to a query.
+
+    **No language model is involved anywhere in here.** This is retrieval on its
+    own, and it is worth understanding before slice 4 puts an answer on top of
+    it: everything that makes Nibble able to find the right page already happens
+    in this function. Slice 4 only adds the sentence at the end.
+
+    Four steps, and none of them is clever:
+
+    1. Turn the query into 384 numbers, the same way every piece was turned into
+       384 numbers when it was uploaded.
+    2. Read every piece that has an embedding out of the database.
+    3. Score all of them at once against the query.
+    4. Return the best TOP_K, highest first.
+
+    Contract, from docs/api.md: {"results": [...], "unsearchable_note_ids": [...]}.
+    """
+    # A blank box is a person pressing enter, not an error worth a stack trace.
+    # .strip() first, because "   " is blank to a human and truthy to Python.
+    query = request.query.strip()
+    if not query:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Type something to search for and Nibble will look through your notes.",
+        )
+
+    try:
+        query_vector = embed_texts([query])[0]
+    except EmbeddingUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Nibble couldn't search just now. {exc}",
+        ) from exc
+
+    db = get_db()
+    try:
+        # WHERE embedding IS NOT NULL is doing real work here. Anything stored
+        # before slice 3 has no vector, and json.loads(None) raises. Skipping
+        # those rows is the decision recorded in docs/scope.md — they are not
+        # backfilled.
+        rows = db.execute(
+            """
+            SELECT c.document_id, c.page, c.content, c.embedding, d.filename
+            FROM chunks c
+            JOIN documents d ON d.id = c.document_id
+            WHERE c.embedding IS NOT NULL
+            """
+        ).fetchall()
+
+        # ...and this is what stops that skip being silent. A note that can
+        # never match anything, sitting in the list looking perfectly normal, is
+        # the failure this project keeps having. Counting them lets the frontend
+        # say so in a sentence instead.
+        #
+        # The ids rather than a COUNT, because a second kind of unsearchable
+        # note is found below and the two sets have to be added together without
+        # counting the same note twice.
+        unsearchable_ids = {
+            row["document_id"]
+            for row in db.execute(
+                "SELECT DISTINCT document_id FROM chunks WHERE embedding IS NULL"
+            ).fetchall()
+        }
+    finally:
+        db.close()
+
+    # Every stored vector, back from JSON text into numbers.
+    #
+    # A vector of the wrong width is skipped here, and its note joins the
+    # unsearchable count. This happens if EMBEDDING_MODEL and EMBEDDING_DIM are
+    # ever changed: everything stored before the change was embedded at the old
+    # width, and comparing a 384-number query against a 768-number piece is not
+    # a close match or a distant one, it is a numpy shape error — a 500 with a
+    # traceback, for every search, until somebody works out why.
+    #
+    # Treating it as "cannot be searched" rather than as an error reuses a
+    # concept that already exists instead of adding a new one, and the fix the
+    # UI already names is the right fix here too: delete the note and upload it
+    # again.
+    matrix = []
+    comparable = []
+    for row in rows:
+        vector = json.loads(row["embedding"])
+        if len(vector) != len(query_vector):
+            unsearchable_ids.add(row["document_id"])
+            continue
+        matrix.append(vector)
+        comparable.append(row)
+
+    rows = comparable
+
+    # The ids, not a count, and sorted so the answer is the same every time.
+    #
+    # A count cannot be reconciled with anything. Delete one of these notes and
+    # the frontend has a number it can no longer trust: it does not know whether
+    # the note it just deleted was one of the ones being counted, so it either
+    # leaves a stale sentence on screen telling somebody to delete a note that is
+    # already gone, or hides a true one. With ids it filters them exactly the way
+    # it filters results, through the same set, and the number it shows is
+    # counted from what is left.
+    unsearchable_note_ids = sorted(unsearchable_ids)
+
+    # No pieces to compare against is an ordinary state — a fresh install, a
+    # database holding only pre-slice-3 notes, or one where every stored vector
+    # was made by a different model. An empty list is a real answer.
+    if not rows:
+        return {"results": [], "unsearchable_note_ids": unsearchable_note_ids}
+
+    scores = cosine_similarity(query_vector, matrix)
+
+    # argsort gives the positions that would sort the scores from low to high,
+    # so [::-1] flips it to high-to-low and the slice takes the best few.
+    best = scores.argsort()[::-1][: config.TOP_K]
+
+    return {
+        "results": [
+            {
+                "document_id": rows[i]["document_id"],
+                "filename": rows[i]["filename"],
+                "page": rows[i]["page"],
+                "content": rows[i]["content"],
+                # Two conversions, both deliberate. float() because numpy's own
+                # float32 is not JSON. max(0.0, ...) because a cosine runs -1 to
+                # 1 and docs/api.md promises 0 to 1 — "less related than
+                # unrelated" is not a distinction worth showing a student.
+                "score": round(max(0.0, float(scores[i])), 3),
+            }
+            for i in best
+        ],
+        "unsearchable_note_ids": unsearchable_note_ids,
+    }
