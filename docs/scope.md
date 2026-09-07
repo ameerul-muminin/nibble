@@ -56,7 +56,7 @@ already closed.
 | 1   | Upload and list       | Slice 1 — Upload and list | done, merged            |
 | 1.5 | Handwriting and scans | — (unplanned)             | done, merged            |
 | 2   | Chunking              | Slice 2 — Chunking        | done, merged            |
-| 3   | Search, no AI yet     | Slice 3 — Search          | built, PR open          |
+| 3   | Search, no AI yet     | Slice 3 — Search          | done, merged            |
 | 4   | Nibble answers        | Slice 4 — Nibble answers  | open                    |
 | 5   | Make it Nibble        | Slice 5 — Make it Nibble  | open                    |
 | 6   | Quiz mode (stretch)   | Slice 6 — Quiz mode       | open                    |
@@ -70,17 +70,26 @@ magic, and it's a working demo on its own even if everything after it fails.
 
 ## Current state, 2026-09-07
 
-`main` is at `bac397e` and **Slices 0, 1, 1.5 and 2 are all merged.** #33 (chunking),
-#35 (the slice 2 handover and the open-backend decision), #34 (the landing page) and
-#36 (`embeddings.py`) all landed in the last day.
+`main` is at `4458c72` and **Slices 0, 1, 1.5, 2 and 3 are all merged.** #33
+(chunking), #35 (the slice 2 handover and the open-backend decision), #34 (the
+landing page), #36 (`embeddings.py`) and #37 (the rest of search) all landed
+within a day, and **#11, #12, #13 and #14 are closed.**
 
-**Slice 3 is built.** #11 is merged; #12, #13 and #14 are built and waiting on a
-pull request, so search works end to end and the milestone still shows three open
-issues. Slice 4 is next and nothing in it has started.
+**The demo now exists.** Upload a chapter, ask a question in your own words, and
+the right paragraph comes back with the page it is on and how well it matched —
+and no language model is involved anywhere in that path. That was the point of
+slice 3 being called the pivotal one, and it holds: if everything after this
+failed, there would still be something worth showing.
 
-Slices 0, 1 and 1.5 are in `main` and work. You can upload a PDF, a text file, a
-Markdown file or a photo, see it listed, and delete it — and a scanned or
-handwritten PDF gets read by a vision model instead of silently arriving empty.
+**Slice 4 is next and nothing in it has started.** #15, #16 and #17 are open. It
+is the last slice the demo depends on, and who builds it is a decision that has
+not been made — see the ownership note under Slice 3 for why that matters more
+this time.
+
+What works, end to end: upload a PDF, a text file, a Markdown file or a photo;
+see it listed and delete it; a scan or handwriting gets read by a vision model
+instead of arriving empty; the text is cut into overlapping pieces you can look
+at; every piece is embedded as it is stored; and search finds the closest ones.
 
 ### The board now agrees with the code
 
@@ -755,6 +764,9 @@ evidence this slice works on something nobody constructed for it:
 Semantic search over the chunks, with no language model anywhere in the path. Contract
 in [`api.md`](./api.md) under "Slice 3".
 
+**Done and merged, 2026-09-07**, in two pull requests: #36 for `embeddings.py` and
+#37 for the rest. All four issues are closed. **99 backend tests pass.**
+
 ### Ownership changed again, mid-slice, 2026-09-07
 
 The plan above this line said Fahim takes #12 and #13 and Arman takes #14,
@@ -781,9 +793,12 @@ Fahim is taking it, he takes it scaffolded, and the scaffolding has to be real �
 signatures and plumbing, with the interesting part left as `TODO(Fahim)`. Slice 4
 is the last slice the demo actually depends on. It is the wrong one to absorb.
 
-- **Board is stale:** #12 and #13 are still assigned to Fahim on GitHub and #14 to
-  Arman. **Reassign all three to Alif**, or the milestone will say three people
-  built this slice when one did.
+- **The board now says three people built this slice, and one did.** #12 and #13
+  closed still assigned to Fahim and #14 to Arman, because they were never
+  reassigned before the merge. Same fossil as #8's wrong signature: harmless in
+  itself, since nobody reads a closed issue, and misleading to anyone reading the
+  milestone later. Recorded here because this file is the truth for reasoning and
+  the board is not going to be corrected retroactively.
 - **Slice 3 makes the stale-selection fix from slice 2 matter**, because search
   results are a second place a deleted note could linger. Handled — `handleDelete`
   now clears matching results too.
@@ -862,9 +877,9 @@ so the suite stays fast.
 ### Checklist
 
 - [x] #11 `embeddings.py` — meaning as numbers, and how to compare them _(Alif)_
-- [ ] #12 Embed each chunk as it is saved _(built; closes when the PR merges)_
-- [ ] #13 `POST /search` — find the right notes, with no AI _(built; closes when the PR merges)_
-- [ ] #14 The search box, showing results with scores _(built; closes when the PR merges)_
+- [x] #12 Embed each chunk as it is saved _(merged in #37)_
+- [x] #13 `POST /search` — find the right notes, with no AI _(merged in #37)_
+- [x] #14 The search box, showing results with scores _(merged in #37)_
 
 ### #11 built, 2026-09-07
 
@@ -1112,9 +1127,24 @@ production build, and every endpoint verified against a real server, and the fir
 thing a person saw was a red error. No test could have caught it: the tests run
 against the code as it is now, and the failure was a *running process* that was not.
 
-**Still not verified: a successful search in the browser.** The stale server needs
-restarting first, and then it takes a minute — there is one searchable note in the
-dev database ready for it.
+**The browser, second attempt.** The stale server was stopped, a current one was
+started, and `POST /search` was checked against it at the port the frontend actually
+uses: 200, the osmosis note at **0.821**, and `unsearchable_note_ids` empty. What is
+still not written down by anybody is a person confirming they *saw* a result on
+screen — the slice merged on the strength of everything else, which is a reasonable
+call and not the same thing as having looked.
+
+### Left over from this slice
+
+- [ ] **There is no test runner in `frontend/` at all.** `npm run lint` and
+      `npm run build` are the only automated checks, and neither can see a race.
+      Four review findings in this slice were about state going stale, three of
+      them fixed in `App.jsx` with nothing able to verify them, and slice 4 puts
+      more async state on the same page. **This wants an issue of its own.**
+- [ ] **A person has not confirmed a search result on screen**, as above.
+- [ ] **`osmosis-slice3.txt` is sitting in the dev database**, uploaded while
+      verifying. It is the only searchable note there, so it is worth keeping until
+      somebody does the browser check, and worth deleting after.
 
 ## Slice 4: Nibble answers
 
