@@ -90,7 +90,8 @@ closed, not when a box here is ticked. Saying the two disagreed out loud, rather
 than quietly ticking the boxes, is what got them closed.
 
 Slice 2's three issues (#8, #9, #10) are **built but still open**, and stay open
-until the pull request merges.
+until the pull request merges. Slice 3 is next and Fahim is taking it, which ends
+the one-off where Alif wrote all of slice 2 — see the note under Slice 3.
 
 ### Two things that are true and easy to misread as "finished"
 
@@ -121,16 +122,49 @@ PR #27 added Clerk authentication to the frontend and merged on 2026-08-29. It h
 in `main` and pretending otherwise makes this file a worse map than no map.
 
 It is not folded into a slice retroactively — inventing a slice after the fact would
-make the plan look like it predicted something it did not. What it needs is a decision,
-and the decision is owed before Slice 4:
+make the plan look like it predicted something it did not. What it needed was a
+decision, and the decision is now made — see below.
 
-- Sign-in currently gates the UI but **no backend route checks anything.** Anyone who
-  can reach `:8000` can upload, list and — once #6 lands — delete. If that is fine for
-  a demo on a laptop, write that down here; if it is not, it needs an issue.
-- Every document is currently shared by everyone. There is no `user_id` on `documents`.
-  Adding one later means reshaping a table that has rows in it, which is the same chore
-  the `chunks` table was created early to avoid.
+### Decision, 2026-09-07: the backend stays open, on purpose
+
+**Clerk gates the UI and nothing else. We are keeping it that way through the demo.**
+
+This came up again while merging the landing page (PR #34), which wraps the app in
+`<Show when="signed-out">`. That is worth having for how the product reads, but it
+should not be mistaken for a gate. Checked against the running backend, with no
+credentials sent at all:
+
+```
+GET http://localhost:8000/documents  ->  200, the real list of notes
+```
+
+`backend/app/routes.py` has no `Depends`, no token check, no `Authorization` header
+anywhere, so `POST /documents` and `DELETE /documents/{id}` are open in the same way.
+`documents` has no `user_id` either — every note belongs to everybody.
+
+Why we are accepting that:
+
+- The demo runs on one laptop. Nothing is deployed, `:8000` is not reachable from
+  anywhere else, and there is no real user data in the database.
+- Real auth is not small. It is Clerk token verification on every route, a `user_id`
+  column, and reshaping a table that already has rows in it — the exact chore the
+  `chunks` table was created early to avoid. That is a slice, and it would come out
+  of Slices 3 and 4, which are the ones the demo actually depends on.
+- The demo is safe from the end of Slice 4. Spending that time on auth risks the
+  thing we are being marked on to fix something nobody can reach.
+
+What this costs us, stated plainly so nobody is surprised at the demo:
+
+- **Do not deploy this anywhere public as it stands.** The moment it is reachable
+  from outside the laptop, this decision is wrong and has to be revisited first.
+- Two people signed into different Clerk accounts on the same backend see the same
+  notes. That is not a bug to file; it is this decision showing through.
+- If somebody asks at the demo "what stops me reading your notes?", the honest answer
+  is "nothing yet, and here is what it would take" — pointing at this section. That
+  is a better answer than pretending the sign-in page does something it does not.
 - Clerk is free at this scale, so the "everything is free" rule still holds.
+
+Revisit this if the project is ever deployed, or if Slices 3-6 finish early.
 
 ## What was fixed in review, 2026-09-06
 
@@ -518,16 +552,18 @@ issues are still open on GitHub, and they close when the PR does.
 - [ ] #9 Save chunks on upload, add `GET /documents/{id}/chunks`
 - [ ] #10 Click a note and see its chunks
 
-### Ownership changed here
+### Ownership: a one-off, and it is over
 
-Alif took ownership of all the code for this slice, so it is written out in full
-rather than scaffolded with `TODO(name)` the way slice 1 was. That is a real
-change to the arrangement in [`team.md`](./team.md) and the table there still
-says otherwise — **the table is the authority, so either it gets updated or this
-slice is a one-off exception.** Whichever it is, someone has to say so; leaving
-the two disagreeing is how the mirror rots.
+Alif took ownership of all the code for **this slice only**, so it is written out
+in full rather than scaffolded with `TODO(name)` the way slice 1 was. The names
+were dropped from the checklist above for the same reason.
 
-The names have been dropped from the checklist above for the same reason.
+**That exception ends here.** Fahim is taking slice 3, so the table in
+[`team.md`](./team.md) stands unchanged and needs no edit — and the rule it exists
+to protect comes back with it: slice 3 gets **scaffolded, not solved**, because
+whoever an issue is assigned to has to come out able to explain the change at
+review. This is written down because a one-off that nobody closes quietly becomes
+the new normal, and the next slice is where that would show.
 
 ### Decided
 
@@ -627,15 +663,104 @@ works through the endpoint and not only against the table.
 `ch1 DB.pdf`, uploaded before this slice existed, returns `200` and `[]` — the
 empty-pieces case, live, exactly as predicted above.
 
-**Not verified: the browser.** Lint and the production build are clean and the
-backend answers correctly with CORS for `http://localhost:5173`, but nobody has
-clicked a note and looked at the panel yet. That is the one thing left on this
-slice, and it is a person's job.
+### Reviewed after building, and what the review got right
+
+Two findings came back. **One was wrong about the code and right about the docs,
+and that distinction is the useful part** — a reviewer describing a real mechanism
+is not the same as a reviewer describing a real defect, and the way to tell them
+apart is to measure rather than to argue.
+
+**"Trimming each window erases the overlap" — the mechanism is real, the harm is
+not.** Every window is `.strip()`ped, so whitespace sitting on a boundary is
+removed from the piece and the overlap shrinks by that much. Measured on real
+input: ordinary prose keeps **149-150 characters against a `CHUNK_OVERLAP` of
+150**, so the cost is about one character. Given 200 spaces spanning the whole
+overlap window the overlap really does drop to **0**.
+
+That last case sounds alarming and is harmless, for a reason worth being able to
+say out loud at the demo: **`.strip()` only ever removes whitespace.** So an
+overlap that has collapsed to nothing is a boundary with nothing but blank space
+on it — no word is being cut there, and there is nothing for an overlap to
+rescue. No non-whitespace character is ever lost from a window either. The promise
+that actually matters is about *words*, and it holds without exception.
+
+So no code changed. What was genuinely wrong was a sentence in
+[`api.md`](./api.md) claiming the tail of one piece is the head of the next, which
+stops being true the moment a window is trimmed. Corrected, and two tests now pin
+the real invariant instead of the overstated one: no word split across a
+whitespace-collapsed boundary, and ordinary prose keeping all but a character or
+two of the overlap.
+
+**"A list reload leaves a stale selection" — valid, and fixed.** `selectedId`
+survived a reload whose rows no longer contained it, so the panel kept showing a
+deleted note's pieces under a heading that had quietly fallen back to the generic
+"Pieces". `handleDelete` covered the note *you* delete; nothing covered the note
+somebody else deleted, and every document here is shared by everyone.
+
+**It was latent, not reachable** — nothing bumps `reloadKey` except the Try again
+button, which only renders after a failed load, and you cannot select a note while
+the list is in that state. Fixed anyway: the combination is wrong on its face and
+becomes reachable the moment anything else reloads the list, which slice 3 is
+likely to add.
+
+The fix uses the function form of `setSelectedId` rather than reading `selectedId`
+directly, and that is the same trap as the `ignore` guard next to it: `selectedId`
+is not in that effect's dependency list, so the captured value would be whatever
+it was when the load started, and clicking a note mid-flight would close the panel
+that had just opened.
+
+**72 tests pass**, up from 70.
+
+### The real textbook, chunked
+
+`ch1 DB.pdf` — the 31-page Silberschatz slide deck that fooled the slice 1.5
+verification — was uploaded again after slice 2 was built, and it is the best
+evidence this slice works on something nobody constructed for it:
+
+- **31 pieces, one per page, and all 31 pages are present.**
+- **14,923 characters stored**, which is exactly the text-layer size recorded for
+  this file back in slice 1.5. Nothing was dropped on the way in.
+- **No page needed cutting.** At about 481 characters a page it is comfortably
+  under `CHUNK_SIZE`, so every page is one piece and the overlap never comes into
+  play. Worth knowing before slice 3: a deck like this gives *page-sized* chunks,
+  not 900-character ones.
+- **Page 1 is 138 characters** — a title and copyright slide. Under the rule as
+  first written, that page would have been deleted without a word. It is kept,
+  which is the correction working on real input rather than in a test.
+
+### Still open on this slice
+
+- [ ] **Nobody has clicked it in a browser.** Lint and the production build are
+      clean and the backend answers correctly with CORS for
+      `http://localhost:5173`, but no person has opened a note and looked at the
+      panel. That is the one thing left here, and it is a person's job.
+- [ ] **Issue #8 still says `chunk_pages(pages: list[str])`** on GitHub, and the
+      code takes `list[tuple[int, str]]`. The board is wrong, not the code — see
+      the decision above. One line to correct.
+- [ ] **#8, #9 and #10 close when the pull request merges**, not before.
 
 ## Slice 3: Search — no AI yet
 
 Semantic search over the chunks, with no language model anywhere in the path. Contract
 in [`api.md`](./api.md) under "Slice 3".
+
+**Next up, and Fahim is taking it.** Which means slice 2's write-it-all-out
+exception is over and this one is **scaffolded, not solved** — structure, function
+signatures and the fiddly plumbing built, the interesting behaviour left as
+`TODO(Fahim)` with a sentence saying what goes there. The pull request gate is
+*explain this in your own words*, and handing over a finished answer moves that
+failure from here to review.
+
+**Two things to settle before it starts:**
+
+- **#11 is still assigned to Alif on the board**, not Fahim — `embeddings.py` is a
+  tech-lead file in [`team.md`](./team.md) precisely because model loading and
+  threading have non-obvious failure modes. If Fahim is taking all of slice 3 then
+  #11 moves and the table changes; if he is taking #12 and #13, it does not.
+  Nobody has said which.
+- **Slice 3 will want the notes list to reload**, which is what makes the stale
+  selection fixed in slice 2 reachable rather than latent. Worth knowing before
+  something reloads the list and the panel starts misbehaving.
 
 ### Decided
 

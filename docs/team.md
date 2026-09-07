@@ -58,15 +58,15 @@ We build in **vertical slices**. Every slice ends in something you could demo
 that day — never a half-finished layer. A demo where one thing works completely
 beats four things that half work.
 
-| Slice | What it adds |
-|---|---|
-| 0 | The two programs talk to each other ✅ |
-| 1 | Upload a PDF and list it |
-| 2 | Cut documents into chunks |
-| 3 | Search your notes — **no AI yet** |
-| 4 | Nibble answers, with sources |
-| 5 | Make it look like Nibble |
-| 6 | Quiz mode (stretch) |
+**What each slice is, and how far along it is, lives in
+[`scope.md`](./scope.md).** It used to be listed here too, and that copy went
+stale — it still had a tick against slice 0 long after slices 1 and 1.5 had
+merged, and it never learned slice 1.5 existed at all. Status kept in three
+places is status kept in none of them, so this file no longer keeps it.
+
+Where to look, in order: **GitHub is the truth for status** — an issue is done
+when it is closed. `scope.md` is the truth for *why* something was built the way
+it was. This file is the truth for how we work together.
 
 Each slice is a GitHub milestone, and each task in it is an issue assigned to
 one person. Take the next issue in the current milestone; don't skip ahead.
