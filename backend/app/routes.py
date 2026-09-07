@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, UploadFile, status
+from pydantic import BaseModel
 
 from app.db import get_db
 from app.files import extract_text
@@ -126,3 +127,61 @@ def list_documents():
         }
         for row in rows
     ]
+
+
+# ---------------------------------------------------------------------------
+# Slice 4 — Nibble answers, with sources
+# ---------------------------------------------------------------------------
+
+
+class AskRequest(BaseModel):
+    """The shape of a POST /ask request body."""
+
+    question: str
+
+
+@router.post("/ask")
+def ask_question(body: AskRequest):
+    """The main endpoint. Search the notes, then ask the model to answer.
+
+    1. Call search_chunks to find the five most relevant pieces of the
+       student's notes.
+    2. Hand those pieces plus the question to ask_with_sources, which builds
+       a prompt and calls the Groq API.
+    3. Return the answer and which files/pages it came from.
+
+    If no documents have been uploaded or no relevant chunks are found, the
+    answer says so and sources is empty.
+    """
+    # Late imports — these modules depend on Slices 2/3 which your friend
+    # built. The late import keeps the app startable even if those modules
+    # are not merged yet (only this route would fail, not the whole server).
+    from app.embeddings import search_chunks
+    from app.llm import ask_with_sources
+
+    question = body.question.strip()
+    if not question:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Question cannot be empty.",
+        )
+
+    # --- Step 1: find relevant chunks -------------------------------------
+    try:
+        results = search_chunks(question)
+    except Exception:
+        # If embeddings aren't set up yet (no documents uploaded, model not
+        # downloaded, etc.), treat it as "nothing found".
+        results = []
+
+    # --- Step 2: ask the model --------------------------------------------
+    try:
+        answer_data = ask_with_sources(question, results)
+    except RuntimeError as exc:
+        # Missing API key or Groq failure — tell the frontend clearly.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+
+    return answer_data

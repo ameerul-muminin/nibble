@@ -104,7 +104,7 @@ Response:
 
 ---
 
-## Slice 4 — planned
+## Slice 4 — built
 
 ### `POST /ask`
 
