@@ -161,11 +161,39 @@ Response:
       "content": "Osmosis is the net movement of water...",
       "score": 0.82
     }
-  ]
+  ],
+  "unsearchable_notes": 0
 }
 ```
 
-`score` runs from 0 to 1. Higher is a closer match.
+`results` holds at most `TOP_K` pieces (5), best match first. An empty list is a
+real answer — nothing in your notes was close enough, or there is nothing to
+search yet.
+
+`score` runs from 0 to 1. Higher is a closer match. The raw measurement is a
+cosine, which can technically come back negative for two pieces of text pointing
+in opposite directions; anything below zero is reported as `0`, because "less
+related than unrelated" is not a distinction worth showing anybody.
+
+`unsearchable_notes` is how many uploaded notes **cannot be searched at all**,
+because they were stored before search existed and have no embedding. It is
+almost always `0`. When it is not, the frontend says so in a sentence — a note
+that silently never matches anything is the exact failure this project keeps
+having, and a count on screen is what stops it being silent. The fix is to delete
+those notes and upload them again; nothing backfills them.
+
+Errors:
+
+| Code | When |
+|---|---|
+| `400` | The query is empty, or only whitespace |
+| `503` | The embedding model could not be loaded |
+
+Both return a `detail` written as a plain sentence, the same as everywhere else.
+
+**Embedding also happens inside `POST /documents`.** It changes no shape there:
+each piece is turned into 384 numbers in the same request that stores it, so an
+upload gets slower and returns exactly what it returned before.
 
 ---
 

@@ -19,11 +19,30 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    env:
+      # Where fastembed keeps the downloaded embedding model. Set explicitly so
+      # the cache step below knows the same path the tests will use — left to
+      # itself, fastembed puts it in a temporary directory that a runner throws
+      # away between jobs.
+      FASTEMBED_CACHE_PATH: ${{ github.workspace }}/.fastembed-cache
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version-file: backend/.python-version
+      # The embedding model is a ~130 MB download, and tests/test_embeddings.py
+      # uses the real one on purpose — a stubbed embedder cannot be wrong about
+      # meaning, so stubbing it would prove nothing. Cached, so only the first
+      # run pays for it.
+      #
+      # The key names the model. Change EMBEDDING_MODEL in config.py and this
+      # has to change with it, or CI restores the wrong model and the download
+      # happens on every run.
+      - name: Cache the embedding model
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.fastembed-cache
+          key: fastembed-bge-small-en-v1.5
       - run: pip install -e ".[dev]"
       - name: Lint
         run: ruff check .

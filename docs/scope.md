@@ -55,8 +55,8 @@ already closed.
 | 0   | The two programs talk | —                         | done, merged            |
 | 1   | Upload and list       | Slice 1 — Upload and list | done, merged            |
 | 1.5 | Handwriting and scans | — (unplanned)             | done, merged            |
-| 2   | Chunking              | Slice 2 — Chunking        | built, not merged       |
-| 3   | Search, no AI yet     | Slice 3 — Search          | open                    |
+| 2   | Chunking              | Slice 2 — Chunking        | done, merged            |
+| 3   | Search, no AI yet     | Slice 3 — Search          | in progress — #11 built |
 | 4   | Nibble answers        | Slice 4 — Nibble answers  | open                    |
 | 5   | Make it Nibble        | Slice 5 — Make it Nibble  | open                    |
 | 6   | Quiz mode (stretch)   | Slice 6 — Quiz mode       | open                    |
@@ -545,12 +545,14 @@ is not being pulled forward**, and the reasoning is there too.
 Cut documents into pieces small enough to search. Contract in [`api.md`](./api.md)
 under "Slice 2".
 
-**Built 2026-09-06**, on branch `feat/slice-2-chunking`. Not merged — the three
-issues are still open on GitHub, and they close when the PR does.
+**Built 2026-09-06 and merged 2026-09-06 as PR #33.** #8, #9 and #10 are closed on
+GitHub, so the boxes below are ticked. This section said "not merged" for a day
+after it was merged, which is the mirror rotting in the direction it always rots —
+the file lags the board, never the other way round.
 
-- [ ] #8 `chunk_pages()` and its tests
-- [ ] #9 Save chunks on upload, add `GET /documents/{id}/chunks`
-- [ ] #10 Click a note and see its chunks
+- [x] #8 `chunk_pages()` and its tests
+- [x] #9 Save chunks on upload, add `GET /documents/{id}/chunks`
+- [x] #10 Click a note and see its chunks
 
 ### Ownership: a one-off, and it is over
 
@@ -734,10 +736,12 @@ evidence this slice works on something nobody constructed for it:
       clean and the backend answers correctly with CORS for
       `http://localhost:5173`, but no person has opened a note and looked at the
       panel. That is the one thing left here, and it is a person's job.
-- [ ] **Issue #8 still says `chunk_pages(pages: list[str])`** on GitHub, and the
-      code takes `list[tuple[int, str]]`. The board is wrong, not the code — see
-      the decision above. One line to correct.
-- [ ] **#8, #9 and #10 close when the pull request merges**, not before.
+- [x] **#8, #9 and #10 closed** when PR #33 merged, as they were supposed to.
+- [ ] **Issue #8 closed still saying `chunk_text()` and `list[str]`.** Nobody
+      corrected it before it closed, so the board now holds a permanent record of
+      a signature the code never had. Harmless, since a closed issue is read by
+      nobody, and left alone rather than reopened — but it is exactly how the next
+      person reading the milestone gets the wrong idea, so: **the code is right.**
 
 ## Slice 3: Search — no AI yet
 
@@ -753,11 +757,11 @@ failure from here to review.
 
 **Two things to settle before it starts:**
 
-- **#11 is still assigned to Alif on the board**, not Fahim — `embeddings.py` is a
-  tech-lead file in [`team.md`](./team.md) precisely because model loading and
-  threading have non-obvious failure modes. If Fahim is taking all of slice 3 then
-  #11 moves and the table changes; if he is taking #12 and #13, it does not.
-  Nobody has said which.
+- **#11 stays with Alif. Settled 2026-09-07 by building it.** `embeddings.py` is a
+  tech-lead file in [`team.md`](./team.md) precisely because model loading has
+  non-obvious failure modes, and it is written out in full for that reason. Fahim
+  takes #12 and #13, Arman #14, both scaffolded. The table in `team.md` stands
+  unchanged and needs no edit.
 - **Slice 3 will want the notes list to reload**, which is what makes the stale
   selection fixed in slice 2 reachable rather than latent. Worth knowing before
   something reloads the list and the panel starts misbehaving.
@@ -778,10 +782,100 @@ describing the old OpenAI setup and does not apply here.
 and is offline after. Flagged in [`first-week.md`](./first-week.md) so it reads as
 expected rather than as a hang.
 
-- [ ] #11 `embeddings.py` — meaning as numbers, and how to compare them _(Alif)_
+### Decided 2026-09-07, before building
+
+**The model loads lazily, not at import.** "Module-level singleton" says it loads
+*once*; it does not say *when*. Loading at import means every `uvicorn --reload`
+after a saved file, and every test collection, pays several seconds for a model
+nobody has asked to use yet. So `get_model()` builds it on first use and hands back
+the same object forever after. The cost is that the first search after a restart is
+slow and every one after it is not — and the frontend says "Searching…" for exactly
+that moment.
+
+**No BGE query prefix.** This model's authors suggest prefixing a search query with
+"Represent this sentence for searching relevant passages:". It buys a little accuracy
+on short queries and it costs a fourth new idea in a slice that already has vectors,
+cosine similarity and numpy. Skipped deliberately, and written down here so nobody
+finds it in the model card later and thinks it was missed.
+
+**Negative scores are clamped to 0 at the route, not in the maths.**
+`cosine_similarity` returns the honest −1 to 1, because that is what a cosine is and
+a function that lies about its own range is worse than one you have to read. The
+route clamps, because [`api.md`](./api.md) promises 0 to 1 and "less related than
+unrelated" is not a distinction worth showing a student. There is a test on each half
+of that.
+
+**Chunks with no embedding are skipped, and the count is shown.** Everything stored
+during slice 2 has `embedding` NULL, including all 31 pieces of `ch1 DB.pdf`. Three
+options were on the table — skip them, backfill with a script, or backfill on
+startup — and skipping won, for the same reason slice 2 refused to backfill: a
+migration nobody runs twice costs more than deleting a note and uploading it again.
+
+What makes that safe rather than silent is the counting. `POST /search` returns
+`unsearchable_notes`, and the search box says how many notes cannot be searched and
+what to do about it. A note that sits in the list and quietly never matches anything
+is the exact failure slice 1.5 and slice 2 both exist to remove; this is the third
+door into it, and it is shut the same way — loudly.
+
+**An upload that cannot be embedded fails entirely.** Same single transaction as
+slice 2: embed after chunking and before the insert, so there is never a document
+whose pieces have no vectors. The alternative — store it now, embed it later — is a
+job queue, which is a whole second system to explain.
+
+**`test_embeddings.py` uses the real model; everything else stubs it.** A stubbed
+embedder returning made-up numbers cannot be wrong about *meaning*, so it would pass
+the cat/kitten test while proving nothing. The 130 MB download is cached in CI, keyed
+on the model name — change `EMBEDDING_MODEL` and that key has to change with it, or
+CI restores the wrong model and downloads on every run. Route tests stub `embed_texts`
+so the suite stays fast.
+
+### Checklist
+
+- [x] #11 `embeddings.py` — meaning as numbers, and how to compare them _(Alif)_
 - [ ] #12 Embed each chunk as it is saved _(Fahim)_
 - [ ] #13 `POST /search` — find the right notes, with no AI _(Fahim)_
 - [ ] #14 The search box, showing results with scores _(Arman)_
+
+### #11 built, 2026-09-07
+
+Written out in full rather than scaffolded, because `embeddings.py` is a tech-lead
+file in [`team.md`](./team.md). #12, #13 and #14 are scaffolded, and that is the
+line: the exception ends where somebody else's issue begins.
+
+- [x] `backend/app/embeddings.py` — `get_model()`, `embed_texts()`,
+      `cosine_similarity()`, and `EmbeddingUnavailable` for a load that fails
+- [x] `backend/tests/test_embeddings.py` — 11 tests. **83 pass**, up from 72
+- [x] `docs/api.md` — the Slice 3 errors, the clamp, and `unsearchable_notes`,
+      written **before** #12 and #13 start, which is what the contract rule is for
+- [x] The fastembed model cached in CI, so only the first run pays 130 MB
+
+**A float32 lesson, from a test that failed.** `cosine_similarity([1,2,3], [[1,2,3]])`
+does not return 1.0. It returns 0.99999994, because dividing by a length and
+multiplying back in 32-bit floats does not land exactly where it started. The first
+version of the test asserted exact equality and failed — correctly. Nothing in this
+project should ever compare two scores with `==`.
+
+### Verified against the real database, before `/search` exists
+
+The 34 chunks already in the dev database — the 31-page Silberschatz deck plus a
+short osmosis note — embedded and scored by hand:
+
+- **34 chunks embedded in 3.9 seconds.** A query embeds and scores against all 34 in
+  **0.01 seconds**, which is the number that makes the no-index decision in
+  [`adr/0001-sqlite-and-numpy.md`](./adr/0001-sqlite-and-numpy.md) look obviously
+  right rather than merely defensible.
+- **"what is a database schema" → p.15, scoring 0.83.** Page 15 is the slide titled
+  *Instances and Schemas*. **"how does a transaction work" → p.26**, the slide titled
+  *Transaction Management*. Neither query shares its wording with the slide it found.
+- **"recipe for banana bread" → 0.46, top score.** Nothing matched, and this is the
+  demo moment.
+
+**One number worth knowing before #14 is built.** The floor is not zero. Total
+nonsense still scores about **0.46**, because two pieces of ordinary English are
+never truly unrelated to this model. So the honest demo line is "watch the scores
+fall from 0.83 to 0.46", not "watch them fall to nothing" — and any threshold slice 4
+uses to decide it found nothing has to be set from real numbers like these, not from
+an intuition that irrelevant means near zero.
 
 ## Slice 4: Nibble answers
 
