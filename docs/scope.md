@@ -56,7 +56,7 @@ already closed.
 | 1   | Upload and list       | Slice 1 — Upload and list | done, merged            |
 | 1.5 | Handwriting and scans | — (unplanned)             | done, merged            |
 | 2   | Chunking              | Slice 2 — Chunking        | done, merged            |
-| 3   | Search, no AI yet     | Slice 3 — Search          | in progress — #11 built |
+| 3   | Search, no AI yet     | Slice 3 — Search          | built, PR open          |
 | 4   | Nibble answers        | Slice 4 — Nibble answers  | open                    |
 | 5   | Make it Nibble        | Slice 5 — Make it Nibble  | open                    |
 | 6   | Quiz mode (stretch)   | Slice 6 — Quiz mode       | open                    |
@@ -70,10 +70,13 @@ magic, and it's a working demo on its own even if everything after it fails.
 
 ## Current state, 2026-09-07
 
-`main` is at `9c0765f` and **Slices 0, 1, 1.5 and 2 are all merged.** #33 (chunking),
-#35 (the slice 2 handover and the open-backend decision) and #34 (the landing page)
-landed in the last day. Slice 3 has started: #11 is built and open as PR #36; #12,
-#13 and #14 are not.
+`main` is at `bac397e` and **Slices 0, 1, 1.5 and 2 are all merged.** #33 (chunking),
+#35 (the slice 2 handover and the open-backend decision), #34 (the landing page) and
+#36 (`embeddings.py`) all landed in the last day.
+
+**Slice 3 is built.** #11 is merged; #12, #13 and #14 are built and waiting on a
+pull request, so search works end to end and the milestone still shows three open
+issues. Slice 4 is next and nothing in it has started.
 
 Slices 0, 1 and 1.5 are in `main` and work. You can upload a PDF, a text file, a
 Markdown file or a photo, see it listed, and delete it — and a scanned or
@@ -90,9 +93,12 @@ closed, not when a box here is ticked. Saying the two disagreed out loud, rather
 than quietly ticking the boxes, is what got them closed.
 
 Slice 2's three issues (#8, #9, #10) **closed when PR #33 merged**, which is the
-mirror working the way it is supposed to. Slice 3 is now underway, and Fahim is
-taking #12 and #13, which ends the one-off where Alif wrote all of slice 2 — see the
-note under Slice 3.
+mirror working the way it is supposed to.
+
+**Slice 3 did not go to the people it was assigned to.** Alif built all four issues.
+The reasoning is under Slice 3, along with what it costs and what it means for
+slice 4 — it is written there rather than here because it is a decision, not a
+status.
 
 ### Two things that are true and easy to misread as "finished"
 
@@ -749,23 +755,38 @@ evidence this slice works on something nobody constructed for it:
 Semantic search over the chunks, with no language model anywhere in the path. Contract
 in [`api.md`](./api.md) under "Slice 3".
 
-**Next up, and Fahim is taking it.** Which means slice 2's write-it-all-out
-exception is over and this one is **scaffolded, not solved** — structure, function
-signatures and the fiddly plumbing built, the interesting behaviour left as
-`TODO(Fahim)` with a sentence saying what goes there. The pull request gate is
-*explain this in your own words*, and handing over a finished answer moves that
-failure from here to review.
+### Ownership changed again, mid-slice, 2026-09-07
 
-**Two things to settle before it starts:**
+The plan above this line said Fahim takes #12 and #13 and Arman takes #14,
+scaffolded rather than solved. **That is not what happened, and this is the
+honest record of it.** After #11 merged, Alif reassigned the rest of the slice to
+himself: Arman had finished the landing page and had nothing else outstanding,
+and Fahim is being kept for slice 4, which is the bigger piece of learning.
 
-- **#11 stays with Alif. Settled 2026-09-07 by building it.** `embeddings.py` is a
-  tech-lead file in [`team.md`](./team.md) precisely because model loading has
-  non-obvious failure modes, and it is written out in full for that reason. Fahim
-  takes #12 and #13, Arman #14, both scaffolded. The table in `team.md` stands
-  unchanged and needs no edit.
-- **Slice 3 will want the notes list to reload**, which is what makes the stale
-  selection fixed in slice 2 reachable rather than latent. Worth knowing before
-  something reloads the list and the panel starts misbehaving.
+So #12, #13 and #14 are **written out in full**, and two ownership lines in
+[`team.md`](./team.md) were crossed to do it — `routes.py` and `backend/tests/`
+are Fahim's, `frontend/src/` is Arman's. Crossing a boundary is a people problem
+before it is a code problem, so: it was the lead's own call, on his own project,
+with both owners unblocked rather than bypassed.
+
+**Two things this costs, and they are worth naming rather than discovering.**
+Slice 2 said "the write-it-all-out exception ends here" and it did not — it has
+now happened twice, which makes it the pattern rather than the exception. And the
+pull-request gate, *explain this in your own words*, only tests the person who
+wrote the code; two of the three developers now have no slice-3 code of their own
+to explain at the demo.
+
+**What that implies for slice 4, and it should be decided before it starts:** if
+Fahim is taking it, he takes it scaffolded, and the scaffolding has to be real —
+signatures and plumbing, with the interesting part left as `TODO(Fahim)`. Slice 4
+is the last slice the demo actually depends on. It is the wrong one to absorb.
+
+- **Board is stale:** #12 and #13 are still assigned to Fahim on GitHub and #14 to
+  Arman. **Reassign all three to Alif**, or the milestone will say three people
+  built this slice when one did.
+- **Slice 3 makes the stale-selection fix from slice 2 matter**, because search
+  results are a second place a deleted note could linger. Handled — `handleDelete`
+  now clears matching results too.
 
 ### Decided
 
@@ -841,15 +862,15 @@ so the suite stays fast.
 ### Checklist
 
 - [x] #11 `embeddings.py` — meaning as numbers, and how to compare them _(Alif)_
-- [ ] #12 Embed each chunk as it is saved _(Fahim)_
-- [ ] #13 `POST /search` — find the right notes, with no AI _(Fahim)_
-- [ ] #14 The search box, showing results with scores _(Arman)_
+- [ ] #12 Embed each chunk as it is saved _(built; closes when the PR merges)_
+- [ ] #13 `POST /search` — find the right notes, with no AI _(built; closes when the PR merges)_
+- [ ] #14 The search box, showing results with scores _(built; closes when the PR merges)_
 
 ### #11 built, 2026-09-07
 
 Written out in full rather than scaffolded, because `embeddings.py` is a tech-lead
-file in [`team.md`](./team.md). #12, #13 and #14 are scaffolded, and that is the
-line: the exception ends where somebody else's issue begins.
+file in [`team.md`](./team.md). #12, #13 and #14 were meant to be scaffolded at this
+point — see the ownership note above for what actually happened.
 
 - [x] `backend/app/embeddings.py` — `get_model()`, `embed_texts()`,
       `cosine_similarity()`, and `EmbeddingUnavailable` for a load that fails
@@ -927,6 +948,69 @@ never truly unrelated to this model. So the honest demo line is "watch the score
 fall from 0.83 to 0.46", not "watch them fall to nothing" — and any threshold slice 4
 uses to decide it found nothing has to be set from real numbers like these, not from
 an intuition that irrelevant means near zero.
+
+### #12, #13 and #14 built, 2026-09-07
+
+The slice is complete: type a question, watch the right paragraph surface, with a
+percentage next to it and no language model anywhere in the path.
+
+- [x] `POST /documents` embeds every piece in **one batched call**, before anything
+      is written, and stores each vector as JSON in the `embedding` column
+- [x] `POST /search` — a Pydantic `SearchRequest`, the 400 for a blank query, one
+      SELECT joining `chunks` to `documents`, `cosine_similarity`, and the best
+      `TOP_K` with the score clamped at 0
+- [x] `backend/tests/test_search.py` — 14 tests. **96 pass**, up from 83
+- [x] `search()` in `api.js`, and the search card in `App.jsx` with all five states:
+      nothing searched, searching, results, nothing found, and failed
+- [x] `.input` and `.visually-hidden` added to `global.css`, both following
+      [`design.md`](./design.md) rather than inventing anything
+- [x] `docs/api.md` — Slice 3 moved from planned to built, and the upload 503 pinned
+- [x] `ruff check`, `ruff format --check`, `npm run lint`, `npm run build` all clean
+
+### Decided while building
+
+**The single transaction now covers the vectors too.** Embedding happens *before*
+the document row is written, not after, so a failure means no document at all. The
+alternative — store it now and embed later — is a job queue, which is a second
+system to explain, and it would leave a window where a note exists that no search
+can find. That window is the exact failure slices 1.5 and 2 both exist to close.
+
+**Search is a snapshot, so deleting a note clears matching results.** Results are
+fetched once and sit there; nothing else would ever remove them. Without this,
+deleting a note leaves its pieces on screen under a filename that no longer exists
+— the same shape of bug the slice 2 review found with the pieces panel, arriving
+by a different route. `handleDelete` filters them out by `document_id`.
+
+**The search box is a `<form>`, not a button with an onClick.** That is what makes
+Enter work, and typing a question and pressing Enter is how everybody expects a
+search box to behave. It costs one `event.preventDefault()` and a comment saying
+why forms reload the page without it.
+
+**Two pieces of state for one query, not one.** `query` is what is in the box;
+`searched` is what produced the results on screen. They differ the moment somebody
+starts typing their next question, and the heading should keep naming the search
+that the results below it actually came from.
+
+### Verified against the real running server
+
+Not tests — the actual backend, on the real dev database, which still holds the
+pre-slice-3 notes:
+
+- **A blank query** returns 400 and the sentence, not a stack trace.
+- **Before uploading anything new: `{"results": [], "unsearchable_notes": 2}`.** The
+  skip-and-count decision, working on real rows rather than in a fixture. Those two
+  notes are `ch1 DB.pdf` and an older osmosis note, both stored before slice 3.
+- **Uploading a note took 2.1 seconds**, embedding included, and it was immediately
+  searchable.
+- **"why do cells swell in pure water" → 0.705.** The note never says "swell", or
+  "cells". **"diffusion" → 0.684**, and the note never says that either. **"recipe
+  for banana bread" → 0.449.** That spread is the demo.
+
+**Still not verified: the browser.** Lint and the production build are clean and
+every backend call above was made against the real server, but no person has typed
+into the search box and looked at the result. Same open item as slice 2, and it is
+still a person's job. The dev database now has one searchable note in it, so that
+check takes about a minute.
 
 ## Slice 4: Nibble answers
 

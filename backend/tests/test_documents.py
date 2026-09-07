@@ -27,6 +27,22 @@ def _use_temp_db(tmp_path, monkeypatch):
     monkeypatch.setattr("app.routes._UPLOADS_DIR", uploads_dir)
 
 
+@pytest.fixture(autouse=True)
+def _fake_embeddings(monkeypatch):
+    """Swap the real embedding model out for a fixed vector, everywhere here.
+
+    From slice 3, uploading embeds every piece — which would mean loading a real
+    model to test a route about file types and page counts. These tests are
+    about the plumbing, so a stub is the honest choice: fast, offline, and it
+    cannot fail for a reason that has nothing to do with what is being tested.
+
+    The real model is exercised in test_embeddings.py, where the claim is about
+    meaning and a stub would prove nothing. What the stub *does* get checked
+    against is test_search.py, which asserts these vectors reach the database.
+    """
+    monkeypatch.setattr("app.routes.embed_texts", lambda texts: [[0.1, 0.2, 0.3] for _ in texts])
+
+
 @pytest.fixture()
 def client():
     """A fresh test client that uses the patched config."""

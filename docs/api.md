@@ -63,6 +63,7 @@ Errors:
 | `400` | Nothing readable found — a blank or unreadable photo |
 | `413` | Larger than 20 MB |
 | `503` | The reading service could not be reached, or the free daily limit is gone |
+| `503` | The search model could not be loaded, so the note could not be made searchable |
 
 Every one of those returns a `detail` written as a plain sentence for a person
 to read. The frontend shows `detail` directly, so it must never contain SQL, a
@@ -136,7 +137,7 @@ count had been taken from it.
 
 ---
 
-## Slice 3 — planned
+## Slice 3 — built
 
 ### `POST /search`
 
@@ -193,7 +194,10 @@ Both return a `detail` written as a plain sentence, the same as everywhere else.
 
 **Embedding also happens inside `POST /documents`.** It changes no shape there:
 each piece is turned into 384 numbers in the same request that stores it, so an
-upload gets slower and returns exactly what it returned before.
+upload gets slower and returns exactly what it returned before. It happens
+*before* anything is written, so a note is never stored without its numbers — an
+upload that cannot be embedded fails with the `503` above rather than landing in
+the list as something no search can ever find.
 
 ---
 

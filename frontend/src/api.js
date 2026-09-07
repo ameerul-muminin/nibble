@@ -93,3 +93,28 @@ export function deleteDocument(id) {
 export function getChunks(id) {
   return request(`/documents/${id}/chunks`)
 }
+
+/**
+ * Slice 3: find the pieces of your notes closest in meaning to some text.
+ *
+ * Returns { results, unsearchable_notes }. Each result is
+ * { document_id, filename, page, content, score }, best match first, and
+ * `score` runs 0 to 1. An empty `results` is a real answer: nothing came close.
+ *
+ * `unsearchable_notes` counts notes stored before search existed, which have no
+ * embedding and can never match anything. The UI says so when it is not zero —
+ * a note that silently never matches is worse than one that says why.
+ *
+ * Note the Content-Type header, which uploadDocument above deliberately does
+ * NOT set. The difference is real: a file upload is multipart and the browser
+ * has to write that header itself, because only it knows the boundary string.
+ * This is plain JSON, so we say so, and FastAPI reads the body as the
+ * SearchRequest model in routes.py.
+ */
+export function search(query) {
+  return request('/search', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query }),
+  })
+}
