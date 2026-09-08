@@ -1889,7 +1889,7 @@ when this slice starts.
 
 **This is the slice that needs the deploy.** A classroom cannot be demoed on one
 laptop — it needs a teacher on one device and a student on another, against the
-Space. Nothing local proves it works.
+deployed backend. Nothing local proves it works.
 
 ### Decided, 2026-09-08, before building
 
@@ -1905,8 +1905,15 @@ second thing to explain, to save a couple of seconds in a classroom where nobody
 racing.
 
 The honest cost: thirty students at one request every three seconds is about ten
-requests a second against a free Space. SQLite reads handle that comfortably. If it
-ever bites, the fix is a longer interval, not a websocket.
+requests a second, against a free Render service with **0.1 of a CPU**. SQLite
+reads are cheap and the poll touches one row, so this should be comfortable — but
+it is unmeasured, and it is the second reason to time things on the real host
+before slice 7 rather than after. If it ever bites, the fix is a longer interval,
+not a websocket.
+
+It also means the room keeps the service awake: Render sleeps a free service after
+15 minutes of no traffic, and a class polling every three seconds is traffic. The
+sleep problem is a before-the-lesson problem, not a during-it one.
 
 **`correct` is stripped for anyone who is not the owner.** The student endpoint
 builds its response field by field — never `dict(row)`, never `SELECT *`. This gets
