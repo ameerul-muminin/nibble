@@ -15,6 +15,7 @@ dependencies = [
   "fastembed>=0.4",           # turns text into numbers, on your laptop -> slice 3
   "numpy>=2.0",               # compares those numbers -> slice 3
   "requests>=2.32",           # calls the Groq API      -> slice 4
+  "pyjwt[crypto]>=2.9",       # checks Clerk's sign-in token -> slice 4.5
 ]
 
 [project.optional-dependencies]

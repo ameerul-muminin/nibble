@@ -62,8 +62,8 @@ already closed.
 | 1.5 | Handwriting and scans | — (unplanned)             | done, merged            |
 | 2   | Chunking              | Slice 2 — Chunking        | done, merged            |
 | 3   | Search, no AI yet     | Slice 3 — Search          | done, merged            |
-| 4   | Nibble answers        | Slice 4 — Nibble answers  | built, in review        |
-| 5   | Make it Nibble        | Slice 5 — Make it Nibble  | open                    |
+| 4   | Nibble answers        | Slice 4 — Nibble answers  | done, merged            |
+| 5   | Make it Nibble        | Slice 5 — Make it Nibble  | in progress             |
 | 6   | Quiz mode (stretch)   | Slice 6 — Quiz mode       | open                    |
 
 **The demo is safe from the end of Slice 4.** Slices 5 and 6 are polish that can be
@@ -75,10 +75,13 @@ magic, and it's a working demo on its own even if everything after it fails.
 
 ## Current state, 2026-09-07
 
-`main` is at `4458c72` and **Slices 0, 1, 1.5, 2 and 3 are all merged.** #33
+`main` is at `b3219a4` and **Slices 0, 1, 1.5, 2, 3 and 4 are all merged.** #33
 (chunking), #35 (the slice 2 handover and the open-backend decision), #34 (the
-landing page), #36 (`embeddings.py`) and #37 (the rest of search) all landed
-within a day, and **#11, #12, #13 and #14 are closed.**
+landing page), #36 (`embeddings.py`), #37 (the rest of search) and #40 (the whole
+of slice 4) all landed within two days, and **#11 through #17 are closed.**
+
+**Slice 5 is the current slice**, and it is the first one that is polish rather
+than plumbing. The four issues in it are #18, #19, #20 and #21.
 
 **The demo now exists.** Upload a chapter, ask a question in your own words, and
 the right paragraph comes back with the page it is on and how well it matched —
@@ -86,10 +89,16 @@ and no language model is involved anywhere in that path. That was the point of
 slice 3 being called the pivotal one, and it holds: if everything after this
 failed, there would still be something worth showing.
 
-**Slice 4 is built and waiting on review.** #15, #16 and #17 are still open on
-GitHub, and GitHub wins on status — they close when the PR merges. The full
+**Slice 4 merged as PR #40**, and #15, #16 and #17 closed with it. The full
 record is under Slice 4: what was built, the chat model Groq retired underneath
-us mid-slice, and why PR #39 was not merged.
+us mid-slice, the sign-out state leak review caught, and why PR #39 was not
+merged.
+
+**One thing merged unverified, and it is still unverified.** Nobody has opened
+slice 4 in a browser. The API is proven end to end against real Groq calls and
+the chat UI is proven by lint and build, which is not the same claim. The two
+checks a person still owes are listed under Slice 4 — they did not stop the merge
+and they have not stopped being owed.
 
 **The demo is now complete.** Upload a chapter, ask a question in your own words,
 and get an answer built from your own pages with the pages it read underneath it
@@ -110,9 +119,13 @@ refusing when they do not cover it.
 
 ### The board now agrees with the code
 
-**22 issues, 6 closed** — #2, #3, #4, #5, #6 and #7. They were built and merged
-weeks apart from being closed, and for a while this file said so while the board
-did not. That gap is shut.
+**22 issues, 16 closed.** It started as 22 with 6 closed — #2 through #7 — which
+were built and merged weeks apart from being closed, and for a while this file
+said so while the board did not. That gap is shut and has stayed shut: every
+slice since has closed its issues on the merge that finished it.
+
+**The six still open are the whole of slices 5 and 6** — #18, #19, #20 and #21,
+then #22 and #23. Nothing before slice 5 is outstanding on the board.
 
 The rule that produced the fix is worth keeping: an issue is done when it is
 closed, not when a box here is ticked. Saying the two disagreed out loud, rather
@@ -1196,6 +1209,13 @@ temptation is to fold it in once there is a chat on the page. Keeping it is what
 makes the answer above it believable: you can watch the retrieval happen with no
 model anywhere near it, then watch the same pieces come back as a sentence.
 
+### Built and merged, 2026-09-07 — PR #40
+
+**PR #40 squash-merged to `main` as `b3219a4`, and #15, #16 and #17 closed with
+it.** Slice 4 is done and the milestone is empty. Two checks a person owes are
+still owed and are listed below — they are recorded as open rather than being
+quietly dropped at the merge.
+
 ### Built, 2026-09-07
 
 - [x] #15 `llm.py` — `SYSTEM_PROMPT`, `build_context()`, `answer()`, and an
@@ -1309,15 +1329,27 @@ component that no longer exists and React drops it.
 
 - [ ] **Not yet verified in a browser.** Lint and build pass. Actually signing
       out and back in as a second Clerk account, in one tab, is a person's job.
+      It is the second item under "Still needing a person" below — the same
+      check, not a second one.
 
 ### Still needing a person
 
+These two outlived the merge. Slice 5 rebuilds most of this screen, so whoever
+picks up #19 will be looking straight at both — do them then rather than treating
+them as slice 4 leftovers nobody owns.
+
 - [ ] **Nobody has opened this in a browser yet.** The API is verified end to end
       with real Groq calls; the chat UI is verified only by lint and build.
-- [ ] **The board.** #15, #16 and #17 close when this merges.
-- [ ] **Who built it.** This is the second slice in a row where the work did not
+- [ ] **Signing out and back in as a second Clerk account, in one tab.** The
+      `key={userId}` fix above is verified by lint and build and by reasoning
+      about how React treats a changed `key`. That is not the same as watching
+      the previous person's questions disappear.
+
+- [x] **The board.** #15, #16 and #17 closed when PR #40 merged.
+- [x] **Who built it.** This was the second slice in a row where the work did not
       go to the people it was assigned to — #16 was Fahim's and #17 was Arman's.
-      See below; it is a decision, not an oversight.
+      Recorded rather than fixed; it is a decision with a cost, and slice 5 is
+      where that cost gets paid or not.
 
 ### PR #39 was not merged, and why
 
@@ -1350,15 +1382,369 @@ rewrite with extra steps.
 - [x] #16 `POST /ask` — search, then answer _(built by Alif; #39 not merged)_
 - [x] #17 Turn the page into a chat with Nibble _(built by Alif)_
 
+## Slice 4.5: Nibble on the internet
+
+A public URL anyone can open: the frontend on Vercel, the backend on Render,
+and — first, because nothing else is safe without it — real auth on every route.
+
+This slice was not in the original plan. It exists because someone asked whether
+Nibble could go on Vercel's free tier, and answering that honestly turned up a
+decision this project had already made and deferred.
+
+### Decided, 2026-09-08 — Vercel cannot host the backend, and that is not a config problem
+
+Vercel hosts the frontend for free and hosts it well. It cannot host this
+backend, for three reasons that are all structural rather than fixable:
+
+- **No disk.** A Vercel function's filesystem is read-only except `/tmp`, which
+  is per-instance and does not survive. `nibble.db` *is* this app's memory. Upload
+  a chapter and the next request can land on an instance that has never seen it.
+  There is no version of this that keeps `sqlite3` and a file on disk, and that
+  file is the whole bet in [`adr/0001-sqlite-and-numpy.md`](./adr/0001-sqlite-and-numpy.md).
+- **Too big.** The Hobby plan caps a Python function at 250 MB unzipped.
+  `fastembed` brings `onnxruntime` and tokenizers with it; add numpy and
+  pypdfium2 and that is gone before the 65 MB model file is counted.
+- **Too slow.** Hobby functions cap at 60 seconds. The first search after any
+  cold start downloads *and* loads the model — so the platform defeats the
+  module-level singleton rule from CLAUDE.md by construction, paying that cost
+  again on every cold start. OCR is worse on purpose: `OCR_MAX_PAGES = 5` at
+  `OCR_RETRY_WAIT_SECONDS = 20` is a deliberately multi-minute upload.
+
+The full reasoning is in [`adr/0003-hosting.md`](./adr/0003-hosting.md). It
+originally chose a free Hugging Face Space over Render; **that half of it is
+superseded** — see the next section.
+
+### The blocker that mattered more than the hosting
+
+The auth decision under Slice 1 said it in one line: **do not deploy this
+anywhere public as it stands.** No route checks who is calling, `documents` has
+no `user_id`, and Clerk gates the UI and nothing else. A public URL without auth
+hands strangers a delete button on your notes.
+
+That decision was made on the explicit condition that nothing is deployed. So
+deploying does not "also need a bit of auth" — it reopens a slice-1 decision, and
+that reopening is most of this slice. The earlier entry deferred auth to protect
+slices 3 and 4; those are now built, which is exactly the condition it named for
+revisiting.
+
+### Decided, 2026-09-08 — how auth is done
+
+- **Clerk verifies, we trust the `sub`.** The frontend already has a Clerk
+  session. It sends the session token as `Authorization: Bearer <token>`, and
+  the backend verifies the signature against Clerk's public keys and reads the
+  `sub` claim. That claim is the user id. We store nothing about a person
+  beyond that opaque string — no email, no name, nothing to leak.
+- **One new dependency, `pyjwt[crypto]`.** `PyJWKClient` fetches and caches
+  Clerk's signing keys. Verifying a JWT by hand is the kind of code that is
+  wrong in ways nobody notices until it matters, and this is the standard tool.
+- **`documents` gets `user_id`; `chunks` does not.** A chunk reaches its owner
+  through `document_id`, which is already indexed and already cascades on
+  delete. A second copy of the same fact is a second thing to keep true.
+- **A note you do not own is a 404, not a 403.** 403 confirms it exists.
+- **`/health` stays open.** The host's health check calls it, and it says
+  nothing about anybody.
+
+### Decided, 2026-09-08 — an old database fails loudly instead of migrating
+
+`CREATE TABLE IF NOT EXISTS` will not add `user_id` to a `documents` table that
+already exists, so an existing `nibble.db` would keep working and quietly ignore
+the new column. That is the silent failure this project keeps trying to avoid.
+
+The options were a migration system or a loud error. We took the loud error:
+`db.py` checks the shape of the table it found and, if it is the old one, raises
+a plain sentence telling you to delete the file. Migrations are a genuinely
+useful idea and a whole new one to explain, the data is a demo database, and the
+deploy target starts empty regardless. If Nibble ever holds notes somebody would
+be upset to lose, this is the decision to revisit first.
+
+### The host disappeared before we could deploy to it, 2026-09-08
+
+**Hugging Face made the Docker SDK a paid feature in early July 2026**, and we
+found out by trying to create the Space. A Docker Space now needs PRO on a
+personal account. There was no announcement, no changelog entry and no
+documentation update — people found it because a "Paid" badge appeared on the
+new-Space form. Static Spaces are still free, and a static host cannot run Python.
+
+Everything in this project is free, so PRO is not an option. **The backend goes to
+Render instead**, which [`adr/0003-hosting.md`](./adr/0003-hosting.md) had
+considered and turned down because its free tier sleeps after 15 minutes while a
+Space idled out after 48 hours. That reasoning was right and the thing it was
+compared against no longer exists.
+[`adr/0005-render.md`](./adr/0005-render.md) is the replacement decision.
+
+**This is the second time an external provider changed underneath this project
+without a line of our code changing.** Groq retired `llama-3.3-70b-versatile`
+mid-slice-4 and every `/ask` came back 404; now this. Worth saying out loud at the
+demo, because it is the same lesson twice: the parts that run on our own machine —
+SQLite, numpy, `fastembed` — are the parts that have never broken. Everything
+rented from somebody else has.
+
+### The hosting limit found a real bug, and that is the part worth keeping
+
+Render's free tier is 512 MB of RAM, and the obvious question was whether the
+backend fits. Measuring it turned up a defect that had nothing to do with hosting.
+
+`POST /documents` embeds every piece of a document in **one** `embed_texts` call —
+which slice 3 chose deliberately, and which is still right. What nobody looked at
+is that `fastembed` groups the texts internally, in batches of **256** by default.
+So peak memory grew with the size of the upload, with no ceiling short of the
+20 MB file limit. Measured on real 900-character English, embedding a 400-piece
+document:
+
+| `batch_size` | Peak memory | Time |
+| --- | --- | --- |
+| 256 (the default) | **1275 MB** | 27.8s |
+| 32 | 473 MB | 29.6s |
+| 16 | 341 MB | 29.5s |
+| **8 (chosen)** | **278 MB** | 29.5s |
+
+**Every row took the same thirty seconds.** The work is identical either way; only
+how much of it is held at one moment changes. So the smaller batch is free, and it
+buys something better than a smaller number: **memory is now flat.** At 8, a
+40-piece chapter and a 400-piece book peak at the same place. Before, the ceiling
+was whatever the largest file anybody happened to upload.
+
+The fix is one argument — `batch_size=config.EMBED_BATCH_SIZE` on the `.embed()`
+call — not a loop, which is why it is worth having rather than clever.
+
+Three things this is worth remembering for:
+
+- **A 16 GB laptop hides this completely.** Nothing in 147 tests could have caught
+  it, because nothing asserts memory and the test documents are tiny. It would
+  have appeared as the deployed backend dying on the first real upload, with a log
+  line about a killed process and nothing pointing at embedding.
+- **The constraint found the bug.** Nobody was looking for this. Being forced onto
+  a 512 MB host is the only reason anybody measured, and the measurement improved
+  the app on every machine, not just that one.
+- **"Call it once with everything" was good advice that hid a cost.** The slice 3
+  docstring is still right — batching is much faster than one call per piece — but
+  it said nothing about memory, because on the machine it was written on there was
+  nothing to say.
+
+### What this costs, stated before the demo rather than during it
+
+- **The database resets.** A free Render service has no persistent disk, so
+  `nibble.db` empties whenever it restarts or redeploys. Re-upload your chapter
+  before demoing. This is the ADR-0001 trade showing its edge, and it is the
+  honest answer if someone asks at the demo where the data goes.
+- **Clerk production keys need a domain you control**, and `.vercel.app` is not
+  one. Development keys work on a Vercel URL, with a dev banner and lower rate
+  limits. Fine for a demo; the thing to fix first if Nibble ever gets a real
+  domain.
+- **The first question after a quiet spell is slow.** A free Render service
+  sleeps after **15 minutes** of no traffic and takes about 50 seconds to wake —
+  much more often than the 48 hours a Space would have given us. Open the URL a
+  minute before the demo starts.
+- **Everything is still free.** Vercel Hobby, Render's free tier, Clerk's free
+  tier, and the Groq key we already use. No card anywhere.
+
+### Ownership: this slice crossed every boundary at once
+
+Deploying is not a folder. This slice touches `routes.py` and `tests/` (Fahim),
+`db.py` and `config.py` (Alif), and `api.js` and `App.jsx` (Arman) — and it was
+built by Alif in one pass, because the halves do not work separately: routes
+that demand a token cannot merge before a frontend that sends one.
+
+That is the third slice in a row where the work did not go to the person it was
+assigned to, and this time it was not an accident of who was free. It is
+recorded here rather than smoothed over. Adding auth to a route is a repeating
+pattern over six routes — exactly the shape of task the "don't do the learning
+for them" rule exists to protect, and exactly what was taken away here. If
+slice 5 goes the same way, the problem is the plan, not the week.
+
+### Checklist
+
+- [x] `adr/0003-hosting.md` — why the backend cannot go where the frontend goes
+- [x] `adr/0005-render.md` — why Render, once a free Space stopped existing
+- [x] `api.md` — the auth header, and the 401 every protected route can now return
+- [x] `config.py` — `CLERK_ISSUER`, `CORS_ORIGINS` from the environment
+- [x] `auth.py` — verify the token, return the user id
+- [x] `db.py` — `user_id` on `documents`, and the loud error for an old database
+- [x] `embeddings.py` and `config.py` — `EMBED_BATCH_SIZE`, so memory is flat
+      instead of growing with the size of the upload. 1275 MB down to 278 MB,
+      at no cost in time. Without it the backend does not fit on the host
+- [x] `routes.py` — six routes scoped to the person calling them
+- [x] `tests/conftest.py` — one signed-in user for every test that had none
+- [x] `api.js` and `App.jsx` — send the token on every request
+- [x] `Dockerfile` — the backend as a container, with the model baked in
+- [x] `deploying.md` — the steps, for someone who has never deployed anything
+- [x] Lint, format, tests, and the production build, both sides
+
+### Verified by actually running it, 2026-09-08
+
+147 backend tests pass, both linters and both formatters are clean, and the
+frontend production build succeeds. Beyond that, against a real `uvicorn`:
+
+- `GET /health` with no token → `200 {"status":"ok"}`. It has to stay open; the
+  host's health check calls it.
+- `GET /documents` and `POST /ask` with no token → `401`, with the sentence a
+  person should read rather than a mention of headers.
+- `GET /documents` with `Authorization: Bearer junk` → `401`, and **not** the
+  JWT library's own wording.
+- `CLERK_ISSUER` unset → the backend refuses to start and names the file to copy.
+
+### The bug the run caught, which the tests did not
+
+The old-database guard was written to run *after* `_SCHEMA`, and every test
+passed. Pointing it at the real `backend/nibble.db` — which predates slice 4.5 —
+produced this instead of the friendly sentence:
+
+```
+sqlite3.OperationalError: no such column: user_id
+```
+
+`CREATE INDEX ... ON documents(user_id)` runs as part of the schema and hits the
+missing column before anything gets a chance to explain it. So the check now
+runs *before* the schema, and returns early when `documents` does not exist at
+all, which is a new database rather than an old one.
+
+Worth noting what let this through. Every test builds its database from the
+current schema, so no test had an old-shaped one to find — the check was being
+exercised only in the case it was not written for. The regression test in
+`test_db.py` now creates a slice-1 `documents` table by hand, which is the only
+way to have the thing being guarded against.
+
+This is the second time on this project that a check written for a failure was
+verified only against the success case. It is also exactly the argument for the
+"actually run it" rule in CLAUDE.md: the suite was green and the feature was
+broken for the single database that most matters — the one already on the
+laptop.
+
+### Still needing a person
+
+- [ ] **The actual deploy.** Everything here is verified locally. Nobody has
+      created the Render service or the Vercel project yet, and a deploy that has
+      not run is a deploy that does not work. [`deploying.md`](./deploying.md) is
+      the script to follow.
+- [ ] **Time one real upload on Render.** The free tier gives 0.1 of a CPU and
+      every timing in this project was measured on a laptop. Nobody knows yet how
+      slow embedding is on a fraction of a shared core. This is the open risk in
+      [`adr/0005-render.md`](./adr/0005-render.md), and the fallback if it is
+      unusable is a laptop behind a free `cloudflared` tunnel.
+- [ ] **Two accounts, two sets of notes, one deployed backend.** The whole point
+      of this slice. Sign in as one person, upload something, sign in as another
+      in a private window, and confirm the second sees nothing of the first.
+
 ## Slice 5: Make it Nibble
 
 Design system, mascot, voice. Everything here is already decided in
 [`design.md`](./design.md) — read it rather than inventing styling.
 
-- [ ] #18 The `Button` component with the solid-edge press _(Arman)_
-- [ ] #19 Nibble's moods, empty states and loading states _(Arman)_
-- [ ] #20 Accessibility pass _(Arman)_
-- [ ] #21 Rewrite every message in Nibble's voice _(Alif)_
+### Decided, 2026-09-08, before building
+
+**This is not a restyle, and assuming it is would be the expensive mistake.** The
+design system already exists and is already used: `tokens.css` holds every colour,
+radius and shadow, `global.css` holds `.btn`, `.card`, `.input`, `.bubble`,
+`.source-chip` and `.streak`, and `Landing.jsx` uses all of it correctly.
+`App.jsx` largely does too — its inline styles are flex layout built from tokens,
+not raw values, so there is no token rule being broken there and nothing to
+extract for its own sake. Ripping 1,029 lines of working page apart to move
+`display: flex` into a stylesheet would be a 2,000-line pull request that buys
+nothing anybody can see.
+
+So slice 5 is four narrow things, in files that mostly already look right.
+
+**`Mascot.jsx` is imported by nothing.** That is the finding that made this slice
+concrete. It was written in the rebuild, it takes a `mood` prop, it has a bob
+animation — and no file anywhere imports it. `Landing.jsx` draws Nibble with a
+flat `<img src="/wave-nibble.svg">` instead, and the signed-in app draws no cat at
+all. Nibble is currently a cat-branded product with no cat in it, which is exactly
+the hole #19 exists to fill.
+
+**Four things are broken in a way that only shows up when you look at the CSS**,
+and they go first because every other pull request in this slice touches those
+lines:
+
+- `'2px solid var(--border, #eee)'`, in two places, expands to
+  `2px solid 3px solid var(--ink)`. That is not valid CSS, so the browser throws
+  the whole declaration away: **the note rows and the chunk boxes have no border
+  at all right now.** The fallback never fires — `--border` _is_ defined, as a
+  whole shorthand rather than a colour, so the fallback was never the problem.
+- `var(--danger, #b3261e)`, in two places. `--danger` is not a token and never has
+  been, so this always renders the raw hex — a red that is in no palette,
+  appearing on a page whose errors are supposed to be `--coral`.
+
+Both are precisely what `design.md`'s "never type a raw hex code in a component"
+rule exists to prevent, and both are invisible until somebody reads the file.
+
+### Who is building it, and the cost, stated accurately
+
+**Alif is building all four**, the same as slices 3 and 4.
+
+The first version of this note said the cost was "three slices in a row where
+Arman ships nothing he can explain at the demo". **That was wrong, and it is worth
+recording that it was wrong rather than quietly deleting it.** Arman authored PR
+#34 — `Landing.jsx` and `landing.css`, the entire signed-out front door. He has
+already built against `design.md`, using its tokens and its components correctly,
+and it is the most finished-looking screen in the app. He has a change to explain.
+
+So the honest cost is narrower: slice 5 is the slice most suited to somebody
+learning the frontend — visual, checkable in a browser, no threading and no
+network failure modes — and it is being handed to the person who needs it least.
+That is a real cost and it is being accepted with eyes open, not overlooked.
+
+### Checklist
+
+- [ ] **`fix/borders-and-danger-token`** — the four broken lines above. Its own
+      pull request, first, because "these borders do not render" is its own claim
+      and deserves its own review rather than being buried in a restyle.
+- [ ] **#18 `Button.jsx`** — `variant` of `primary` / `secondary` / `accent`, plus
+      a `plain` variant for the note-row filename toggle, which has to stay a real
+      `<button>` for the keyboard while not looking like one. Replaces every raw
+      `<button>` in `App.jsx` and `Landing.jsx`.
+- [ ] **#19 Nibble's moods, empty states and loading states** — `happy` and
+      `curious` on `Mascot`, then Nibble in the header, in both empty states,
+      thinking while an answer is in flight, and happy beside the newest answer.
+- [ ] **#20 Accessibility pass** — the gaps that are actually left, listed below.
+- [ ] **#21 Nibble's voice** — every user-visible string, frontend and backend.
+
+### The trap in #18, written down before somebody falls into it
+
+`Landing.jsx` wraps its buttons in Clerk's `<SignInButton mode="modal">`. That
+component does not render a button of its own — it **clones the child it is given
+and attaches its own `onClick`**. A `Button` component that names only the props
+it cares about, and drops the rest, therefore throws that `onClick` on the floor,
+and sign-in stops working with no error anywhere: the button still draws, still
+presses, still animates, and does nothing.
+
+So `Button` spreads its remaining props onto the real element. That is the reason
+a component takes props it does not name, and it is a better example of why than
+any explanation in the abstract.
+
+### What #20 actually has left
+
+Most of the accessibility floor is already standing, built in as each slice went
+by rather than bolted on here: real `<label>`s that are visually hidden rather
+than absent, `role="status"` on both the search and the answer, `aria-label` on
+the icon-only delete, `aria-expanded` on the note toggle, a `:focus-visible` ring
+in `global.css`, and `prefers-reduced-motion` honoured. A real button was used
+everywhere a `<div onClick>` would have been easier.
+
+That is the point worth making at the demo — the pass is short _because_ the floor
+was built from the start. What is left:
+
+- **Coral error text carries its meaning by colour alone.** `design.md` forbids
+  exactly that. It needs a word or an icon beside it.
+- **`.btn:disabled` is `opacity: 0.45`.** Ink on lime at 45% is almost certainly
+  under 4.5:1, and the Ask button spends every slow answer in that state.
+- **`Mascot` has a hardcoded `aria-label="Nibble the cat"`.** That becomes a lie
+  the moment it has moods, and in most of the places #19 puts it the text beside
+  it already says the thing — so it is decorative there and should be hidden from
+  a screen reader rather than announced twice.
+- **The keyboard run-through needs a person.** Unplug the mouse; upload, search,
+  ask and delete. Nothing here can assert that.
+
+### The two strings in #21 that are not really wording
+
+- **The "Slice 0 — is everything talking?" card.** A developer's debug panel,
+  sitting at the top of the product, above the thing the product is for. It says
+  "Next up: Slice 1, uploading a PDF" to a person who is looking at four finished
+  slices. The health check behind it is worth keeping; the card is not.
+- **The backend's `detail` sentences.** `docs/api.md` promises they are written
+  for a person and shown verbatim, so the voice pass has to cross into the
+  backend to finish. **`routes.py` is Fahim's file** — #21 assigns this rewrite to
+  Alif, so the crossing is sanctioned by the issue rather than taken, but it gets
+  named in the pull request rather than passing silently.
 
 ## Slice 6: Quiz mode
 

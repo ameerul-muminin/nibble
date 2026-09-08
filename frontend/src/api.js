@@ -10,12 +10,51 @@
 
 // Where the backend lives. Falls back to localhost, which is what you want
 // while developing.
-const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
+//
+// `||` rather than `??`, and the difference bites here. `??` only falls back on
+// null and undefined, so a `VITE_API_URL=` line left blank in .env.local — which
+// is exactly what .env.example invites you to do — would set this to the empty
+// string, and the empty string is not null. Every request would then go to
+// `/documents` on the Vite dev server instead of the backend, and come back as
+// Vite's own 404 page. `||` treats blank as "not set", which is what a person
+// leaving it blank meant.
+const BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 // FastAPI's own words when there is no route at that address at all, and when
 // the method is wrong. They are written for a developer reading a log, not for
 // a person using the app — see the comment in messageFor below.
 const FRAMEWORK_DEFAULTS = ['Not Found', 'Method Not Allowed']
+
+/**
+ * How this file asks Clerk for the current sign-in token. Slice 4.5.
+ *
+ * From slice 4.5 the backend refuses to answer anything about notes unless it
+ * knows who is asking, so every request has to carry a token. The awkward part
+ * is that only a React component can call Clerk's hooks, and this file is not
+ * one — it is plain JavaScript that components import.
+ *
+ * So App hands the function in, once, and `request` below uses it for every
+ * call. That keeps the rule this file already had: components call
+ * `getDocuments()` and think about notes, not about headers.
+ *
+ * It starts as "no token", which is the right answer before anybody has signed
+ * in — `getHealth()` runs then, and it is the one route that needs no sign-in.
+ */
+let getToken = async () => null
+
+/**
+ * Tell this file how to get a token. Called once, by App.
+ *
+ * Clerk's `getToken` returns a *fresh* token each time it is asked, because a
+ * session token is short-lived on purpose — it is a thing anyone holding it can
+ * use, so it is made to stop working quickly. That is why we keep the function
+ * and call it per request, rather than keeping a token and reusing it. A stored
+ * token would work for a few minutes and then start failing in a way that looks
+ * random.
+ */
+export function setTokenGetter(fn) {
+  getToken = fn
+}
 
 /**
  * Turn a failed response into one sentence worth showing somebody.
@@ -48,6 +87,14 @@ function messageFor(status, detail) {
     return 'Nibble’s backend didn’t understand that request. If you just updated it, restart it and try again.'
   }
 
+  // 401 has its own sentence because the backend's one is written for the case
+  // where you were never signed in, and the case that actually happens to a
+  // person mid-session is a token that quietly aged out while the tab sat open.
+  // "Sign in again" is the fix for both.
+  if (status === 401) {
+    return 'You’ve been signed out. Sign in again and Nibble will pick up where you left off.'
+  }
+
   return `Nibble’s backend answered with ${status}. Try again in a moment.`
 }
 
@@ -55,8 +102,20 @@ function messageFor(status, detail) {
  * A small wrapper around fetch that does the boring bits: build the full URL,
  * turn a failure into a real error, and hand back the parsed JSON.
  */
-async function request(path, options) {
-  const response = await fetch(`${BASE}${path}`, options)
+async function request(path, options = {}) {
+  // Ask Clerk for a token, every time. See setTokenGetter above for why this is
+  // not cached.
+  const token = await getToken()
+
+  // Spread the caller's own headers first, then add ours. uploadDocument sets
+  // no Content-Type on purpose and search/ask set one — this leaves both alone
+  // and only adds Authorization on top.
+  const headers = { ...options.headers }
+  if (token) {
+    headers.Authorization = `Bearer ${token}`
+  }
+
+  const response = await fetch(`${BASE}${path}`, { ...options, headers })
 
   if (!response.ok) {
     let detail = null

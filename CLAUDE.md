@@ -136,6 +136,7 @@ good — use it rather than inventing something.
 | `docs/design.md` | Colour, type, voice, accessibility |
 | `docs/adr/` | Why a road was not taken |
 | `docs/first-week.md` | Setup from zero; assumes no terminal experience |
+| `docs/deploying.md` | Putting it on the internet; assumes you've never deployed |
 
 If a beginner gets stuck following `docs/first-week.md`, the doc is wrong. Fix the
 doc, not the person.

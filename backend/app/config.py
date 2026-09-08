@@ -23,6 +23,29 @@ DATABASE_FILE = os.getenv("DATABASE_FILE", "nibble.db")
 EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
 EMBEDDING_DIM = 384  # this model turns any text into exactly 384 numbers
 
+# How many pieces the model is given at once.
+#
+# This is a memory setting, not a speed one, and it is the difference between
+# the backend fitting on a free host and being killed by it. `fastembed`
+# defaults to 256, and the whole upload is handed over in one call — so peak
+# memory grows with the size of the document rather than staying put.
+#
+# Measured on real 900-character English, embedding a 400-piece document:
+#
+#     batch_size=256 (the default)   1275 MB
+#     batch_size=32                   473 MB
+#     batch_size=16                   341 MB
+#     batch_size=8                    278 MB
+#
+# Every one of those took the same ~30 seconds, so the smaller batch is free.
+# 8 was chosen because the deploy target has 512 MB and the idle backend with
+# the model loaded is already 227 MB of it.
+#
+# The thing worth understanding: this makes memory *flat*. At 8, a 40-piece
+# chapter and a 400-piece book both peak at the same number. Without it, the
+# ceiling is whatever the biggest file anybody uploads happens to be.
+EMBED_BATCH_SIZE = 8
+
 # --- The language model (slice 4) ----------------------------------------
 # Groq runs open-source models for free. Get a key (no card needed) at
 # https://console.groq.com/keys and put it in your .env file.
@@ -110,4 +133,52 @@ TOP_K = 5  # how many pieces we hand to the model when answering
 
 # --- Who is allowed to call us -------------------------------------------
 # A browser will refuse to let a page on :5173 call :8000 unless we say so.
-CORS_ORIGINS = ["http://localhost:5173"]
+#
+# This is a list because the deployed frontend lives somewhere else entirely —
+# a vercel.app address — and both have to work: the same backend serves your
+# laptop while you develop and the real site once it is up. Set it in the
+# environment as one line of comma-separated addresses, e.g.
+#
+#     CORS_ORIGINS=http://localhost:5173,https://nibble.vercel.app
+#
+# No trailing slash on any of them. An origin is scheme + host + port and
+# nothing else; "https://nibble.vercel.app/" does not match and the browser
+# will block the call with a message that does not mention the slash.
+CORS_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("CORS_ORIGINS", "http://localhost:5173").split(",")
+    if origin.strip()
+]
+
+# --- Who is calling us (slice 4.5) ---------------------------------------
+# Clerk already puts the sign-in button on the page. From slice 4.5 it also
+# tells the backend who is asking, so your notes are yours.
+#
+# The frontend sends Clerk's session token on every request. We verify that
+# token's signature against Clerk's public keys and read the `sub` claim out of
+# it, which is that person's id. See auth.py — it is about fifteen lines.
+#
+# This is the issuer, and it is what Clerk calls your "Frontend API URL": it
+# looks like https://something-something-12.clerk.accounts.dev and it is in the
+# Clerk dashboard under API keys. It is NOT a secret — it is in every token any
+# browser holds — but it is different for every Clerk application, so it cannot
+# have a useful default.
+CLERK_ISSUER = os.getenv("CLERK_ISSUER", "")
+
+# Where Clerk publishes the public half of the keys it signs tokens with.
+# Standard location, derived rather than configured, so there is one fewer
+# setting to get wrong.
+CLERK_JWKS_URL = f"{CLERK_ISSUER.rstrip('/')}/.well-known/jwks.json"
+
+# Fail now, loudly, rather than at the first upload with a confusing 500.
+#
+# Without this the app starts perfectly happily and every single protected route
+# answers 401, which looks like "my login is broken" and is actually "nobody
+# filled in a setting". That is the exact failure this rule exists to stop —
+# see CLAUDE.md, "fail loudly on a missing setting at startup".
+if not CLERK_ISSUER:
+    raise RuntimeError(
+        "CLERK_ISSUER is not set, so the backend cannot check who is signed in. "
+        "Copy backend/.env.example to backend/.env and fill it in — the value is "
+        "the Frontend API URL in your Clerk dashboard, under API keys."
+    )

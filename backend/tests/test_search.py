@@ -19,6 +19,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.embeddings import EmbeddingUnavailable
+from tests.conftest import TEST_USER_ID
 
 # Three topics, one direction each: osmosis, databases, and everything else.
 # A query about osmosis points exactly the same way as an osmosis chunk, so it
@@ -158,8 +159,8 @@ def _insert_note_with_no_embedding(filename: str = "old.pdf") -> int:
     db = get_db()
     try:
         cursor = db.execute(
-            "INSERT INTO documents (filename, page_count, created_at) VALUES (?, ?, ?)",
-            (filename, 1, "2026-09-01T10:00:00"),
+            "INSERT INTO documents (user_id, filename, page_count, created_at) VALUES (?, ?, ?, ?)",
+            (TEST_USER_ID, filename, 1, "2026-09-01T10:00:00"),
         )
         document_id = cursor.lastrowid
         db.execute(
@@ -233,8 +234,8 @@ def test_a_vector_of_the_wrong_width_is_skipped_and_counted(client):
     db = get_db()
     try:
         cursor = db.execute(
-            "INSERT INTO documents (filename, page_count, created_at) VALUES (?, ?, ?)",
-            ("old-model.txt", 1, "2026-09-01T10:00:00"),
+            "INSERT INTO documents (user_id, filename, page_count, created_at) VALUES (?, ?, ?, ?)",
+            (TEST_USER_ID, "old-model.txt", 1, "2026-09-01T10:00:00"),
         )
         db.execute(
             "INSERT INTO chunks (document_id, page, content, embedding) VALUES (?, ?, ?, ?)",
@@ -264,8 +265,8 @@ def test_a_note_counts_once_even_if_it_is_unsearchable_twice_over(client):
     db = get_db()
     try:
         cursor = db.execute(
-            "INSERT INTO documents (filename, page_count, created_at) VALUES (?, ?, ?)",
-            ("mixed.txt", 2, "2026-09-01T10:00:00"),
+            "INSERT INTO documents (user_id, filename, page_count, created_at) VALUES (?, ?, ?, ?)",
+            (TEST_USER_ID, "mixed.txt", 2, "2026-09-01T10:00:00"),
         )
         document_id = cursor.lastrowid
         db.execute(

@@ -19,10 +19,25 @@ from app import config
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS documents (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    -- Whose note this is: Clerk's id for a person, straight from the `sub`
+    -- claim of their session token. See auth.py. Added in slice 4.5, when
+    -- Nibble got a public URL and "every note belongs to everybody" stopped
+    -- being an acceptable trade.
+    --
+    -- There is no `users` table and no foreign key to one. Clerk owns the
+    -- people; we only ever hold the id, so a second table would be a copy of
+    -- someone else's data that we would then have to keep in step.
+    user_id    TEXT    NOT NULL,
+
     filename   TEXT    NOT NULL,
     page_count INTEGER NOT NULL,
     created_at TEXT    NOT NULL   -- ISO 8601, e.g. '2026-08-07T09:14:22'
 );
+
+-- Every list, search and delete now starts with "the documents belonging to this
+-- person", so the database should find them without reading every row.
+CREATE INDEX IF NOT EXISTS idx_documents_user_id ON documents(user_id);
 
 -- Slice 2 fills this in and slice 3 fills in the embedding. It is created now,
 -- with slice 1, because changing the shape of a table that already has rows in
@@ -71,5 +86,50 @@ def get_db() -> sqlite3.Connection:
     # chunks just quietly stay behind. Worth knowing about before slice 2.
     conn.execute("PRAGMA foreign_keys = ON")
 
+    # Before the schema, not after. Running _SCHEMA against a database from
+    # before slice 4.5 fails on its own — the new index names a column that is
+    # not there — and it fails as a raw sqlite3.OperationalError reading "no
+    # such column: user_id", which is a traceback rather than an answer. Asking
+    # first is what lets the sentence below be the thing anybody sees.
+    _check_shape(conn)
+
     conn.executescript(_SCHEMA)
     return conn
+
+
+def _check_shape(conn: sqlite3.Connection) -> None:
+    """Refuse to run against a database from before notes had owners.
+
+    ``CREATE TABLE IF NOT EXISTS`` does exactly what it says: if `documents`
+    already exists, the statement above does nothing at all — including nothing
+    about the `user_id` column added in slice 4.5. So a database created before
+    that change keeps working, silently, with a schema the code no longer
+    matches. Every insert would fail on a column that is not there, and every
+    query would be filtering on one either.
+
+    A migration system is the grown-up answer to this and a whole new idea to
+    explain. What this project does instead is fail loudly and say what to do,
+    which is the same trade as everywhere else: the data is a handful of
+    uploaded chapters, and re-uploading them costs a minute.
+
+    Raises:
+        RuntimeError: the `documents` table exists but predates `user_id`.
+    """
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(documents)").fetchall()}
+
+    # An empty answer means the table does not exist at all, which is a brand
+    # new database and completely fine — the schema is about to create it. Only
+    # a `documents` that exists *without* user_id is the bad case, and telling
+    # those two apart is the whole reason this looks at the columns rather than
+    # just asking whether user_id is missing.
+    if not columns:
+        return
+
+    if "user_id" not in columns:
+        conn.close()
+        raise RuntimeError(
+            f"The database file '{config.DATABASE_FILE}' was made before notes "
+            "had owners, so Nibble cannot tell whose notes are whose in it. "
+            "Delete the file and start the backend again — it will build a fresh "
+            "one, and you can re-upload your notes."
+        )
