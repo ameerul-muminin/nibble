@@ -2307,6 +2307,73 @@ another and the change looked saved when it was not. Both handlers now capture
 the id and compare it inside the state updater, which sees the state as it is
 now rather than as it was when the request started.
 
+### The free tier was measured, and two of these settings were guesses
+
+A ten-question quiz came back **"Nibble is being asked a lot at once"**, and
+behind it was a second failure that never reached the screen: a `400` reading
+`json_validate_failed` with an empty `failed_generation`. Both were ours.
+
+**The rate limit was written down wrong.** These settings said "the free tier
+caps OUTPUT at 1,000 tokens per minute", copied across from the OCR settings.
+That figure belongs to the *vision* model and was never checked against the chat
+one. Asking Groq — the headers come back on every reply — the real limit for
+`openai/gpt-oss-120b` is:
+
+    x-ratelimit-limit-tokens: 8000      per minute, INPUT AND OUTPUT TOGETHER
+
+Which changes which number matters. Output was never the expensive part. The
+note we send is: at `QUIZ_MAX_CONTEXT_CHARS = 12_000` one quiz sent about 3,000
+tokens of it, so a single quiz cost roughly half the minute — and `/ask` at
+`TOP_K = 12` spends from the same budget. Now 6,000 characters, about a quarter.
+
+**And `max_tokens` covers reasoning, not just the answer.** Measured, same note,
+same ten questions:
+
+| `reasoning_effort` | reasoning tokens | answer tokens | questions |
+| --- | --- | --- | --- |
+| medium | **893** | 621 | 10 |
+| low | **31** | 615 | 10 |
+
+At medium, reasoning alone was 893 of the 1,000 allowed, so the JSON ran out of
+room part-way through and Groq rejected the incomplete reply. Nothing was wrong
+with the questions — there was no space left to finish writing them.
+
+**`QUIZ_REASONING_EFFORT` was "medium" because a comment asserted it had to be**,
+claiming a model gets lazy about distractors at "low". Plausible, and untested.
+Twenty-nine times the reasoning for the same ten usable questions. Now "low",
+with `QUIZ_MAX_OUTPUT_TOKENS` raised to 2,000 so nothing truncates.
+
+The distractors at "low" were read by hand and are genuine. **The caveat,
+because it flatters the result:** the note checked was itself a multiple-choice
+bank, so the model had real options in front of it. A chapter of prose is the
+harder case, and that is the first knob to turn if distractors come back weak —
+with a measurement next time, not an assertion.
+
+Verified end to end afterwards: ten questions asked for, ten returned, every
+page real. **The visible cost of the smaller context is that they came from
+pages 1-3 of an 11-page note.** Questions come from the beginning of a long
+note, which the prompt is honest about. The real fix is quizzing a section
+rather than a chapter, and that is a slice rather than a number.
+
+**A better 429, too.** Groq says exactly when the budget returns, and we were
+discarding it and guessing "in a moment" — the wrong advice when the honest
+answer is fifty seconds, because somebody retries at once, fails, and concludes
+the feature is broken.
+
+### A fourth stale-response bug, from review
+
+`handleOpen` applied its reply unconditionally. Open quiz A, change your mind and
+open B before A loads, and A lands afterwards and replaces B — in B's mode.
+Deleting A while it loaded reopened it; making a new quiz while one loaded got
+replaced by the old one.
+
+Fixed with the same `openRun` counter `searchRun` already uses in App.jsx: every
+action that opens, closes or replaces the open quiz takes the next number, and a
+reply only writes if its number is still current. **That is now three bugs in
+this component from the same root** — a reply landing after the thing it was for
+stopped being what anybody wanted. Worth remembering as a shape rather than
+three separate fixes.
+
 ### The stale backend, and why the message was right
 
 The quiz card first came back with *"Nibble's backend doesn't know about that

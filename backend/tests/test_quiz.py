@@ -40,6 +40,7 @@ class _FakeResponse:
         self.status_code = status_code
         self.ok = 200 <= status_code < 300
         self.text = text
+        self.headers = {}
         self._payload = payload
 
     def json(self):
@@ -257,10 +258,40 @@ def test_the_network_being_down_is_a_sentence_not_a_traceback(monkeypatch):
         quiz.make_questions("notes", 5, PAGES)
 
 
-def test_being_asked_too_fast_says_to_try_again_in_a_moment(monkeypatch):
+def test_being_asked_too_fast_says_how_long_to_wait(monkeypatch):
+    """Groq says when the budget returns. Guessing "a moment" when the honest
+    answer is most of a minute makes people retry, fail, and give up."""
+    response = _FakeResponse(status_code=429, text="rate limit")
+    response.headers = {"x-ratelimit-reset-tokens": "49.035s"}
+    _capture(monkeypatch, response)
+
+    with pytest.raises(quiz.QuizUnavailable, match="about 50 seconds"):
+        quiz.make_questions("notes", 5, PAGES)
+
+
+def test_retry_after_is_used_when_it_is_there(monkeypatch):
+    response = _FakeResponse(status_code=429, text="rate limit")
+    response.headers = {"retry-after": "12"}
+    _capture(monkeypatch, response)
+
+    with pytest.raises(quiz.QuizUnavailable, match="about 13 seconds"):
+        quiz.make_questions("notes", 5, PAGES)
+
+
+def test_an_unreadable_wait_still_gives_a_sentence(monkeypatch):
+    """Never throw while building an error message."""
+    response = _FakeResponse(status_code=429, text="rate limit")
+    response.headers = {"retry-after": "soon-ish"}
+    _capture(monkeypatch, response)
+
+    with pytest.raises(quiz.QuizUnavailable, match="a minute"):
+        quiz.make_questions("notes", 5, PAGES)
+
+
+def test_no_rate_limit_headers_at_all_still_gives_a_sentence(monkeypatch):
     _capture(monkeypatch, _FakeResponse(status_code=429, text="rate limit"))
 
-    with pytest.raises(quiz.QuizUnavailable, match="in a moment"):
+    with pytest.raises(quiz.QuizUnavailable, match="a minute"):
         quiz.make_questions("notes", 5, PAGES)
 
 

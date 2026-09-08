@@ -22,7 +22,7 @@
  * somebody other than you needs to see them, and that is slice 8.
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   createQuiz,
   deleteQuestion,
@@ -58,6 +58,21 @@ export function QuizMe({ docs, onNoteGone }) {
   // it survives scrolling and re-renders without anything being stored.
   const [picked, setPicked] = useState({})
 
+  // Which attempt to change what is on screen is the newest one.
+  //
+  // Every action that opens, closes or replaces the open quiz takes the next
+  // number, and a reply only writes if its number is still current. Without it,
+  // a slow request wins over a newer one just by finishing later: click
+  // Practise on quiz A, change your mind and click Edit on quiz B, and A's
+  // reply lands afterwards and puts A on screen in B's mode. Deleting A while
+  // it was loading reopened it. Making a new quiz while one was loading got
+  // replaced by the old one.
+  //
+  // The same guard, and the same reason, as `searchRun` in App.jsx. A ref
+  // rather than state because changing it must not cause a render — it is
+  // bookkeeping about renders, not something to draw.
+  const openRun = useRef(0)
+
   useEffect(() => {
     let ignore = false
 
@@ -87,6 +102,11 @@ export function QuizMe({ docs, onNoteGone }) {
     const name = title.trim()
     if (!noteId || !name) return
 
+    // Claims the newest run, so a quiz still loading cannot land on top of the
+    // one being made here. See openRun above.
+    const run = openRun.current + 1
+    openRun.current = run
+
     setBusy(true)
     setNotice(null)
     try {
@@ -95,8 +115,13 @@ export function QuizMe({ docs, onNoteGone }) {
       // Straight into editing. The whole point of this slice is that the model
       // gets questions wrong and you fix them, so landing on the list would put
       // an extra click in front of the thing you came to do.
-      setOpen(quiz)
-      setMode('editing')
+      //
+      // ...unless something newer was asked for while this was writing, which
+      // takes seconds and is the easiest of all of these to click past.
+      if (openRun.current === run) {
+        setOpen(quiz)
+        setMode('editing')
+      }
       setQuizzes((current) => [
         {
           id: quiz.id,
@@ -123,18 +148,32 @@ export function QuizMe({ docs, onNoteGone }) {
   }
 
   async function handleOpen(id, nextMode) {
+    const run = openRun.current + 1
+    openRun.current = run
+
     setNotice(null)
     try {
       const quiz = await getQuiz(id)
+
+      // Somebody asked for something else while this was in the air. Their
+      // request is the one that should win, whatever order the replies arrive
+      // in, so this one is dropped rather than drawn.
+      if (openRun.current !== run) return
+
       setOpen(quiz)
       setMode(nextMode)
       setPicked({})
     } catch (error) {
+      if (openRun.current !== run) return
       setNotice(error?.message || 'Nibble could not open that quiz.')
     }
   }
 
   async function handleDeleteQuiz(id) {
+    // A delete is also an intent about what should be on screen: without this,
+    // deleting a quiz that was still loading let its reply reopen it.
+    openRun.current += 1
+
     setNotice(null)
     try {
       await deleteQuiz(id)
@@ -371,7 +410,16 @@ export function QuizMe({ docs, onNoteGone }) {
               marginBottom: 'var(--gap)',
             }}
           >
-            <button type="button" className="btn btn--secondary" onClick={() => setOpen(null)}>
+            <button
+              type="button"
+              className="btn btn--secondary"
+              onClick={() => {
+                // Going back is an intent too: a quiz still loading must not
+                // reopen itself after you have left. See openRun above.
+                openRun.current += 1
+                setOpen(null)
+              }}
+            >
               ← All quizzes
             </button>
             <strong style={{ flex: 1 }}>{open.title}</strong>

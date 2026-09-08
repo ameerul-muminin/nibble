@@ -206,19 +206,53 @@ ASK_HISTORY_CHARS = 1000
 QUIZ_QUESTION_COUNT = 5
 
 # The most anybody can ask for, and this ceiling is Groq's rather than ours.
-#
-# The free tier caps OUTPUT at 1,000 tokens per minute and reserves against
-# max_tokens rather than against what actually comes back — the same trap
-# OCR_MAX_OUTPUT_TOKENS documents above. Ten questions is roughly 800 tokens,
-# which is most of a minute's allowance on a key already shared with reading
-# handwriting and with every /ask. Asking for twenty would not be slow, it would
-# be a 429 before a single question was written.
 QUIZ_MAX_QUESTIONS = 10
 
-# The ceiling on one quiz's reply. Ten questions of four options each, with
-# prompts, is about 800 tokens; 1000 leaves room for a long question without
-# reserving so much that the per-minute cap rejects the request outright.
-QUIZ_MAX_OUTPUT_TOKENS = 1000
+# --- What the free tier actually allows, measured on 2026-09-09 --------------
+#
+# **This was written down wrong first, and the wrong version is worth naming.**
+# These settings originally said "the free tier caps OUTPUT at 1,000 tokens per
+# minute", copied across from OCR_MAX_OUTPUT_TOKENS below. That figure belongs
+# to the VISION model. It was never checked against the chat model, and it is
+# not true of it.
+#
+# Asking Groq directly, by reading the rate-limit headers it returns on every
+# reply, for openai/gpt-oss-120b on this key:
+#
+#     x-ratelimit-limit-tokens: 8000      <- per minute
+#     x-ratelimit-limit-requests: 1000    <- per day
+#
+# **8,000 tokens a minute, and it counts INPUT AND OUTPUT TOGETHER.** That
+# changes which number matters. Output was never the expensive part: ten
+# questions is about 800 tokens. The expensive part is the note we send, and one
+# quiz used to send about 3,000 tokens of it — so a single quiz cost roughly
+# 4,000 of the 8,000, and generating two in a minute, or one after a couple of
+# questions to /ask, was a 429.
+#
+# That is exactly what happened: a 10-question quiz came back "Nibble is being
+# asked a lot at once", and it was our own request that had eaten the budget.
+
+# The ceiling on one quiz's reply.
+#
+# **This was 1000, and 1000 was the bug behind a 400.** A ten-question quiz came
+# back as `json_validate_failed` with an empty `failed_generation`, which reads
+# like the model producing nonsense and is not that at all.
+#
+# `max_tokens` on this model covers REASONING AS WELL AS OUTPUT, and the two
+# were measured separately:
+#
+#     reasoning_effort  reasoning   answer   completion
+#     medium                  893      621         1514
+#     low                      31      615          646
+#
+# At medium, reasoning alone was 893 of the 1000 allowed. The JSON then ran out
+# of room part-way through, Groq validated it, found it incomplete, and rejected
+# the whole reply. Nothing was wrong with the questions; there was no space left
+# to finish writing them.
+#
+# 2000 is roughly three times what a ten-question quiz actually spends at the
+# effort now used, so a long question cannot truncate one again.
+QUIZ_MAX_OUTPUT_TOKENS = 2000
 
 # How much of the note the model is shown when writing questions.
 #
@@ -226,20 +260,48 @@ QUIZ_MAX_OUTPUT_TOKENS = 1000
 # against — "write me five questions about this chapter" has no query. So the
 # chunks go in from the start of the document until this budget runs out.
 #
-# 12,000 characters is roughly the first dozen pages of a chapter. It is a
-# budget rather than a whole document on purpose: a 200-page book would
-# otherwise be sent in full, which is slow, and is a request large enough to be
-# refused. Questions then come from the beginning of a long note, which is
-# honest and predictable — and is written into the prompt so the model does not
-# pretend to have covered the end.
-QUIZ_MAX_CONTEXT_CHARS = 12_000
+# **This was 12,000 and that was too much**, for the reason measured above: at
+# roughly four characters to a token it sent about 3,000 tokens of note, and
+# with the reply reserved on top, one quiz cost about half the minute's entire
+# allowance. Two quizzes in a minute could not both work, and often the first
+# one could not either, because /ask had already spent some of it.
+#
+# 6,000 characters is about 1,500 tokens, so a quiz now costs roughly a quarter
+# of the budget instead of a half. Three or four in a minute, rather than one
+# and a half.
+#
+# It is a budget rather than a whole document on purpose: a 200-page book would
+# otherwise be sent in full, which is slow and large enough to be refused
+# outright. Questions come from the beginning of a long note, which is honest
+# and predictable — and the prompt says so, so the model does not imply it
+# covered the end.
+#
+# The real fix for a long note is to quiz a section rather than a chapter, and
+# that is a slice rather than a number. Noted in docs/scope.md.
+QUIZ_MAX_CONTEXT_CHARS = 6_000
 
-# Writing a question is harder than answering one, so this is higher than
-# ANSWER_REASONING_EFFORT. A question needs three wrong options that are wrong
-# but not obviously wrong, which is the part a model gets lazy about at "low" —
-# it produces one plausible distractor and two throwaways, and the quiz marks
-# itself.
-QUIZ_REASONING_EFFORT = "medium"
+# **This said "medium", and that was asserted rather than measured.** The claim
+# written here was that a question needs three wrong-but-not-obviously-wrong
+# options, and that a model gets lazy about those at "low". Plausible. Untested.
+#
+# Tested, on the same note, asking for the same ten questions:
+#
+#     effort    reasoning tokens   questions returned
+#     medium                 893                   10
+#     low                     31                   10
+#
+# Twenty-nine times the reasoning for the same number of usable questions, on a
+# budget of 8,000 tokens a minute shared with /ask and with reading handwriting.
+# That is what was producing "Nibble is being asked a lot at once".
+#
+# The distractors at "low" were read by hand and are genuine — plausible, same
+# kind of thing as the answer, wrong for a workable reason. **One caveat, said
+# out loud because it flatters the result:** the note checked was itself a
+# multiple-choice bank, so the model had real options in front of it to draw on.
+# A chapter of prose is the harder case, and if distractors ever come back weak
+# on one, this is the first knob to turn — with a measurement, this time, not an
+# assumption.
+QUIZ_REASONING_EFFORT = "low"
 
 # --- Who is allowed to call us -------------------------------------------
 # A browser will refuse to let a page on :5173 call :8000 unless we say so.

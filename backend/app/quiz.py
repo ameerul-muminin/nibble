@@ -74,6 +74,38 @@ Never invent material to reach the count.
 """
 
 
+def _retry_hint(response) -> str:
+    """How long to wait, in words, from whatever the reply is willing to say.
+
+    Groq returns ``retry-after`` (whole seconds) and
+    ``x-ratelimit-reset-tokens`` (like "49.035s") on a 429. Either is far better
+    than guessing, because the guess people write is "in a moment" and the true
+    answer is often most of a minute — long enough that retrying straight away
+    fails again and the feature looks broken rather than busy.
+
+    Falls back to "a minute" when neither header is there or either is
+    unreadable. A slightly pessimistic number is a much better failure than an
+    exception thrown while building an error message.
+    """
+    raw = response.headers.get("retry-after") or response.headers.get(
+        "x-ratelimit-reset-tokens", ""
+    )
+
+    try:
+        seconds = float(str(raw).rstrip("s"))
+    except (TypeError, ValueError):
+        return "a minute"
+
+    if seconds <= 0:
+        return "a moment"
+    if seconds < 60:
+        # Rounded up: telling somebody 49 seconds and having it still fail at 49
+        # is worse than telling them 50 and having it work.
+        return f"about {int(seconds) + 1} seconds"
+
+    return "a minute"
+
+
 class QuizUnavailable(RuntimeError):
     """We could not get a usable quiz — no key, no network, or an unusable reply.
 
@@ -185,7 +217,15 @@ def make_questions(context: str, count: int, pages: set[int]) -> list[dict]:
             raise QuizUnavailable(
                 "Nibble has written as many questions as it can today. Try again tomorrow."
             )
-        raise QuizUnavailable("Nibble is being asked a lot at once. Try again in a moment.")
+
+        # Groq says exactly when the budget comes back, and we were throwing it
+        # away and guessing "in a moment" instead. "In a moment" is the wrong
+        # advice when the honest answer is fifty seconds — somebody retries
+        # immediately, fails again, and concludes the feature is broken.
+        raise QuizUnavailable(
+            "Nibble has used up its allowance for the minute. "
+            f"Try again in {_retry_hint(response)}."
+        )
 
     if not response.ok:
         raise QuizUnavailable(f"The question writer answered with {response.status_code}.")
