@@ -1384,9 +1384,8 @@ rewrite with extra steps.
 
 ## Slice 4.5: Nibble on the internet
 
-A public URL anyone can open: the frontend on Vercel, the backend on a Hugging
-Face Space, and — first, because nothing else is safe without it — real auth on
-every route.
+A public URL anyone can open: the frontend on Vercel, the backend on Render,
+and — first, because nothing else is safe without it — real auth on every route.
 
 This slice was not in the original plan. It exists because someone asked whether
 Nibble could go on Vercel's free tier, and answering that honestly turned up a
@@ -1411,8 +1410,9 @@ backend, for three reasons that are all structural rather than fixable:
   again on every cold start. OCR is worse on purpose: `OCR_MAX_PAGES = 5` at
   `OCR_RETRY_WAIT_SECONDS = 20` is a deliberately multi-minute upload.
 
-The full reasoning, and why Hugging Face Spaces rather than Render, is in
-[`adr/0003-hosting.md`](./adr/0003-hosting.md).
+The full reasoning is in [`adr/0003-hosting.md`](./adr/0003-hosting.md). It
+originally chose a free Hugging Face Space over Render; **that half of it is
+superseded** — see the next section.
 
 ### The blocker that mattered more than the hosting
 
@@ -1457,20 +1457,85 @@ useful idea and a whole new one to explain, the data is a demo database, and the
 deploy target starts empty regardless. If Nibble ever holds notes somebody would
 be upset to lose, this is the decision to revisit first.
 
+### The host disappeared before we could deploy to it, 2026-09-08
+
+**Hugging Face made the Docker SDK a paid feature in early July 2026**, and we
+found out by trying to create the Space. A Docker Space now needs PRO on a
+personal account. There was no announcement, no changelog entry and no
+documentation update — people found it because a "Paid" badge appeared on the
+new-Space form. Static Spaces are still free, and a static host cannot run Python.
+
+Everything in this project is free, so PRO is not an option. **The backend goes to
+Render instead**, which [`adr/0003-hosting.md`](./adr/0003-hosting.md) had
+considered and turned down because its free tier sleeps after 15 minutes while a
+Space idled out after 48 hours. That reasoning was right and the thing it was
+compared against no longer exists.
+[`adr/0005-render.md`](./adr/0005-render.md) is the replacement decision.
+
+**This is the second time an external provider changed underneath this project
+without a line of our code changing.** Groq retired `llama-3.3-70b-versatile`
+mid-slice-4 and every `/ask` came back 404; now this. Worth saying out loud at the
+demo, because it is the same lesson twice: the parts that run on our own machine —
+SQLite, numpy, `fastembed` — are the parts that have never broken. Everything
+rented from somebody else has.
+
+### The hosting limit found a real bug, and that is the part worth keeping
+
+Render's free tier is 512 MB of RAM, and the obvious question was whether the
+backend fits. Measuring it turned up a defect that had nothing to do with hosting.
+
+`POST /documents` embeds every piece of a document in **one** `embed_texts` call —
+which slice 3 chose deliberately, and which is still right. What nobody looked at
+is that `fastembed` groups the texts internally, in batches of **256** by default.
+So peak memory grew with the size of the upload, with no ceiling short of the
+20 MB file limit. Measured on real 900-character English, embedding a 400-piece
+document:
+
+| `batch_size` | Peak memory | Time |
+| --- | --- | --- |
+| 256 (the default) | **1275 MB** | 27.8s |
+| 32 | 473 MB | 29.6s |
+| 16 | 341 MB | 29.5s |
+| **8 (chosen)** | **278 MB** | 29.5s |
+
+**Every row took the same thirty seconds.** The work is identical either way; only
+how much of it is held at one moment changes. So the smaller batch is free, and it
+buys something better than a smaller number: **memory is now flat.** At 8, a
+40-piece chapter and a 400-piece book peak at the same place. Before, the ceiling
+was whatever the largest file anybody happened to upload.
+
+The fix is one argument — `batch_size=config.EMBED_BATCH_SIZE` on the `.embed()`
+call — not a loop, which is why it is worth having rather than clever.
+
+Three things this is worth remembering for:
+
+- **A 16 GB laptop hides this completely.** Nothing in 147 tests could have caught
+  it, because nothing asserts memory and the test documents are tiny. It would
+  have appeared as the deployed backend dying on the first real upload, with a log
+  line about a killed process and nothing pointing at embedding.
+- **The constraint found the bug.** Nobody was looking for this. Being forced onto
+  a 512 MB host is the only reason anybody measured, and the measurement improved
+  the app on every machine, not just that one.
+- **"Call it once with everything" was good advice that hid a cost.** The slice 3
+  docstring is still right — batching is much faster than one call per piece — but
+  it said nothing about memory, because on the machine it was written on there was
+  nothing to say.
+
 ### What this costs, stated before the demo rather than during it
 
-- **The database resets.** A free Space has no persistent disk, so `nibble.db`
-  empties whenever the Space restarts or rebuilds. Re-upload your chapter before
-  demoing. This is the ADR-0001 trade showing its edge, and it is the honest
-  answer if someone asks at the demo where the data goes.
+- **The database resets.** A free Render service has no persistent disk, so
+  `nibble.db` empties whenever it restarts or redeploys. Re-upload your chapter
+  before demoing. This is the ADR-0001 trade showing its edge, and it is the
+  honest answer if someone asks at the demo where the data goes.
 - **Clerk production keys need a domain you control**, and `.vercel.app` is not
   one. Development keys work on a Vercel URL, with a dev banner and lower rate
   limits. Fine for a demo; the thing to fix first if Nibble ever gets a real
   domain.
-- **The first question after a quiet spell is slow.** The Space idles out after
-  48 hours of no traffic and takes a minute to wake. Open the URL before the
-  demo starts.
-- **Everything is still free.** Vercel Hobby, a free CPU Space, Clerk's free
+- **The first question after a quiet spell is slow.** A free Render service
+  sleeps after **15 minutes** of no traffic and takes about 50 seconds to wake —
+  much more often than the 48 hours a Space would have given us. Open the URL a
+  minute before the demo starts.
+- **Everything is still free.** Vercel Hobby, Render's free tier, Clerk's free
   tier, and the Groq key we already use. No card anywhere.
 
 ### Ownership: this slice crossed every boundary at once
@@ -1489,15 +1554,19 @@ slice 5 goes the same way, the problem is the plan, not the week.
 
 ### Checklist
 
-- [x] `adr/0003-hosting.md` — why not Vercel, why not Render, why a Space
+- [x] `adr/0003-hosting.md` — why the backend cannot go where the frontend goes
+- [x] `adr/0005-render.md` — why Render, once a free Space stopped existing
 - [x] `api.md` — the auth header, and the 401 every protected route can now return
 - [x] `config.py` — `CLERK_ISSUER`, `CORS_ORIGINS` from the environment
 - [x] `auth.py` — verify the token, return the user id
 - [x] `db.py` — `user_id` on `documents`, and the loud error for an old database
+- [x] `embeddings.py` and `config.py` — `EMBED_BATCH_SIZE`, so memory is flat
+      instead of growing with the size of the upload. 1275 MB down to 278 MB,
+      at no cost in time. Without it the backend does not fit on the host
 - [x] `routes.py` — six routes scoped to the person calling them
 - [x] `tests/conftest.py` — one signed-in user for every test that had none
 - [x] `api.js` and `App.jsx` — send the token on every request
-- [x] `Dockerfile` — the backend as a Space, with the model baked in
+- [x] `Dockerfile` — the backend as a container, with the model baked in
 - [x] `deploying.md` — the steps, for someone who has never deployed anything
 - [x] Lint, format, tests, and the production build, both sides
 
@@ -1507,7 +1576,7 @@ slice 5 goes the same way, the problem is the plan, not the week.
 frontend production build succeeds. Beyond that, against a real `uvicorn`:
 
 - `GET /health` with no token → `200 {"status":"ok"}`. It has to stay open; the
-  Space's health check calls it.
+  host's health check calls it.
 - `GET /documents` and `POST /ask` with no token → `401`, with the sentence a
   person should read rather than a mention of headers.
 - `GET /documents` with `Authorization: Bearer junk` → `401`, and **not** the
@@ -1544,9 +1613,14 @@ laptop.
 ### Still needing a person
 
 - [ ] **The actual deploy.** Everything here is verified locally. Nobody has
-      pushed the Space or the Vercel project yet, and a deploy that has not run
-      is a deploy that does not work. [`deploying.md`](./deploying.md) is the
-      script to follow.
+      created the Render service or the Vercel project yet, and a deploy that has
+      not run is a deploy that does not work. [`deploying.md`](./deploying.md) is
+      the script to follow.
+- [ ] **Time one real upload on Render.** The free tier gives 0.1 of a CPU and
+      every timing in this project was measured on a laptop. Nobody knows yet how
+      slow embedding is on a fraction of a shared core. This is the open risk in
+      [`adr/0005-render.md`](./adr/0005-render.md), and the fallback if it is
+      unusable is a laptop behind a free `cloudflared` tunnel.
 - [ ] **Two accounts, two sets of notes, one deployed backend.** The whole point
       of this slice. Sign in as one person, upload something, sign in as another
       in a private window, and confirm the second sees nothing of the first.

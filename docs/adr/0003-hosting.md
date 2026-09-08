@@ -1,6 +1,21 @@
 # ADR 0003 — Vercel for the frontend, a Hugging Face Space for the backend
 
-**Status:** accepted · **Date:** 2026-09-08 · **Decided by:** tech lead
+**Status:** accepted, but the backend half is **superseded by
+[`0005-render.md`](./0005-render.md)** · **Date:** 2026-09-08 ·
+**Decided by:** tech lead
+
+> **Superseded the same day it was written, and not by us.** Hugging Face made
+> the Docker SDK a paid feature in early July 2026, which we did not know when
+> this was written — a Docker Space now needs PRO, and everything in this project
+> is free. The backend goes to Render instead; see
+> [`0005-render.md`](./0005-render.md).
+>
+> **The rest of this document still stands and is still worth reading.** Why
+> Vercel cannot host the backend is unchanged, and so is the requirement that
+> produced it: this app needs a real container with a real filesystem. Only the
+> answer to "which one" moved. The section below on Render was written when a
+> free Space existed to compare it against, and 0005 revisits it on the merits
+> now that one does not.
 
 ## Context
 

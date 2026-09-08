@@ -1,13 +1,3 @@
----
-title: Nibble API
-emoji: 🐹
-colorFrom: yellow
-colorTo: pink
-sdk: docker
-app_port: 7860
-pinned: false
----
-
 # Nibble's backend
 
 FastAPI, SQLite, and a small embedding model that runs on the machine rather
@@ -23,17 +13,16 @@ uvicorn app.main:app --reload
 Then open <http://localhost:8000/health>. Full setup, from nothing, is in
 [`../docs/first-week.md`](../docs/first-week.md).
 
-## Why this file starts with all that `---` stuff
+## Where this runs when it is deployed
 
-That block at the top is not documentation, it is configuration. This folder is
-also a [Hugging Face Space](https://huggingface.co/spaces), which is where the
-backend runs once it is deployed, and a Space reads its settings out of the
-front of its README: which SDK to use (`docker`, so it builds our
-[`Dockerfile`](./Dockerfile)) and which port the app listens on.
+On [Render](https://render.com), as a Docker web service built from the
+[`Dockerfile`](./Dockerfile) next to this file. **You do not need Docker to work
+on Nibble** — that file is read by Render's build servers, not by you.
 
-It looks odd and it is genuinely load-bearing — a Space with no `app_port` waits
-for an app on the wrong port and shows a build that never finishes starting.
-
-[`../docs/deploying.md`](../docs/deploying.md) is the step-by-step, and
-[`../docs/adr/0003-hosting.md`](../docs/adr/0003-hosting.md) is why a Space and
-not somewhere else.
+This README used to begin with a block of `---` YAML, which was configuration
+for a Hugging Face Space. That is gone, because Hugging Face made Docker Spaces
+a paid feature in July 2026 and everything in this project is free.
+[`../docs/adr/0005-render.md`](../docs/adr/0005-render.md) is the replacement
+decision, [`../docs/adr/0003-hosting.md`](../docs/adr/0003-hosting.md) is why the
+backend needs a real container at all, and
+[`../docs/deploying.md`](../docs/deploying.md) is the step-by-step.
