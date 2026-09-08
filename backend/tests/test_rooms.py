@@ -546,6 +546,24 @@ def test_deleting_the_note_takes_the_rooms_too(client, room):
 # suite can.
 
 
+def _lying_then_truthful(stale):
+    """A _state_now that answers `stale` once, then tells the truth.
+
+    That is exactly what the losing side of a race sees: its first look happened
+    before the other request committed, and every look after it did not.
+    """
+    from app import routes
+
+    real = routes._state_now
+    looks = {"n": 0}
+
+    def _look(db, room_id):
+        looks["n"] += 1
+        return stale if looks["n"] == 1 else real(db, room_id)
+
+    return _look
+
+
 def _count(tmp_path, table):
     import sqlite3
 
@@ -645,3 +663,52 @@ def test_the_quiz_being_deleted_as_the_class_opens_is_a_404(client, room, monkey
 
     assert response.status_code == 404
     assert "deleted" in response.json()["detail"]
+
+
+def test_a_start_in_flight_cannot_reopen_a_class_that_closed(client, room, monkeypatch):
+    """Two of the teacher's own requests overlap while the room is waiting.
+
+    Both read `waiting` and both are legal moves from it, so an unconditional
+    write lets whichever commits second win — End lands, then a Start that was
+    already in the air puts the class back open with its questions being handed
+    out again. The worst outcome of any race in this slice.
+
+    The stale read is forced here: the first look says `waiting`, as it did
+    before the other request committed, and the truth underneath is `closed`.
+    """
+    _start(client, room["id"])
+    _end(client, room["id"])
+
+    monkeypatch.setattr("app.routes._state_now", _lying_then_truthful("waiting"))
+
+    response = _start(client, room["id"])
+
+    assert response.status_code == 400
+    assert "reopened" in response.json()["detail"]
+    # The important half: the room is still closed underneath.
+    assert client.get(f"/rooms/{room['id']}").json()["state"] == "closed"
+
+
+def test_the_other_request_doing_the_same_job_is_not_an_error(client, room, monkeypatch):
+    """Two Starts overlap. One of them writes; the other finds it already done.
+
+    Nothing went wrong and nobody should be told off — the room is where this
+    request asked for it to be.
+    """
+    _start(client, room["id"])
+
+    monkeypatch.setattr("app.routes._state_now", _lying_then_truthful("waiting"))
+
+    response = _start(client, room["id"])
+
+    assert response.status_code == 200
+    assert response.json()["state"] == "open"
+
+
+def test_a_class_deleted_mid_move_is_a_sentence_not_a_500(client, room, monkeypatch):
+    """Deleted between the ownership check and the state read."""
+    monkeypatch.setattr("app.routes._state_now", lambda db, room_id: None)
+
+    response = _start(client, room["id"])
+
+    assert response.status_code == 404

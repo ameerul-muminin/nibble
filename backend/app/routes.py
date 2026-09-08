@@ -1528,6 +1528,24 @@ def _state_now(db, room_id: int) -> str | None:
     return None if row is None else row["state"]
 
 
+def _refuse_backwards(state: str) -> None:
+    """Refuse a move that would take a room back to a state it has left.
+
+    Its own function because it is raised from two places in `set_room_state` —
+    once for the state read before the write, once for the state found after a
+    compare-and-set that did not match — and the sentence has to be the same
+    both times. Two copies of a message is how two messages start.
+    """
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=(
+            "A class that has ended can’t be reopened. Open a new one for the same quiz."
+            if state == "closed"
+            else "A class that has started can’t go back to waiting."
+        ),
+    )
+
+
 def _has_handed_in(db, room_id: int, user_id: str) -> bool:
     """Has this person already handed a paper in for this room?
 
@@ -1784,6 +1802,9 @@ def set_room_state(
     - **Backwards** — a 400. Reopening a closed room would let a second paper
       land against a class that is over, and the answers already stored are the
       reason that matters.
+
+    **The move is written as a compare-and-set**, and that is what makes the
+    rule above true rather than merely checked. See the comment on the UPDATE.
     """
     wanted = request.state
 
@@ -1797,25 +1818,63 @@ def set_room_state(
     try:
         _own_room(db, room_id, user_id)
 
-        current = db.execute("SELECT state FROM rooms WHERE id = ?", (room_id,)).fetchone()["state"]
+        current = _state_now(db, room_id)
+
+        # Deleted between _own_room above and this line. Rare, and it would
+        # otherwise be a TypeError on a row that is not there — a 500 for
+        # something somebody did on purpose in another tab.
+        if current is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="That class isn’t here. It may already have been deleted.",
+            )
 
         # The states are held in order, so "forwards" is just a comparison of
         # where each one sits in the tuple. Reading it out of the order they are
         # written in beats a table of which move is allowed from where — there is
         # one line to check rather than nine.
         if _STATES.index(wanted) < _STATES.index(current):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    "A class that has ended can’t be reopened. Open a new one for the same quiz."
-                    if current == "closed"
-                    else "A class that has started can’t go back to waiting."
-                ),
-            )
+            _refuse_backwards(current)
 
         if wanted != current:
-            db.execute("UPDATE rooms SET state = ? WHERE id = ?", (wanted, room_id))
+            # **AND state = ?**, and the rule above is only real because of it.
+            #
+            # The check that just ran read the state in its own moment, and this
+            # write happens in another. Two of the teacher's own requests can
+            # overlap — two tabs, or anything driving the API directly — and
+            # both then validate against the same "waiting" before either
+            # writes. Written unconditionally, whichever commits *second* wins:
+            # End lands, then a Start that was already in flight overwrites it,
+            # and a class that had finished is open again with its questions
+            # being handed out. That is the worst outcome of any race in this
+            # slice, so this is the one place the write is made to carry its own
+            # precondition rather than trusting the read.
+            #
+            # No loop is needed to settle it. Every writer here only ever moves
+            # forwards, so a failed compare-and-set means somebody else moved it
+            # forwards, and one more look is enough to say whether that landed
+            # where this request wanted or past it.
+            changed = db.execute(
+                "UPDATE rooms SET state = ? WHERE id = ? AND state = ?",
+                (wanted, room_id, current),
+            )
             db.commit()
+
+            if changed.rowcount == 0:
+                settled = _state_now(db, room_id)
+
+                if settled is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="That class isn’t here. It may already have been deleted.",
+                    )
+
+                if _STATES.index(wanted) < _STATES.index(settled):
+                    _refuse_backwards(settled)
+
+                # Otherwise the other request did this one's job — the room is
+                # where this asked for it to be. Nothing left to do, and no
+                # reason to tell anybody off for it.
 
         return _room_for_teacher(db, room_id)
     finally:

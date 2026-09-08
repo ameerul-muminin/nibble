@@ -2678,13 +2678,26 @@ prevent in the first place. A choice made on the landing page, before signing in
 would go with it. `App` is never unmounted, so the value survives, and it is
 passed back down as a prop.
 
-### Four races found in review, all four valid, all four fixed
+### Five races found in review, all five valid, all five fixed
 
 Every room route reads before it writes — is the class open, has this person
-answered, is this code free — and **the read is not inside the write**. Something
-else can commit in that gap. Review found four of them and they were all real,
-though only two could do damage worth the name:
+answered, is this code free, where is this room now — and **the read is not
+inside the write**. Something else can commit in that gap. Review found five,
+across two passes, and they were all real, though only three could do damage
+worth the name:
 
+- **A closed class reopened by a Start that was still in flight.** Two of the
+  teacher's own requests overlap while the room is `waiting`; both read
+  `waiting`, both are legal moves from it, and the write was unconditional — so
+  whichever committed *second* won. End lands, the Start behind it overwrites
+  it, and a class that had finished is open again **with its questions being
+  handed out.** The worst outcome of anything found here, and the only one that
+  reaches the answers themselves.
+
+  It is also the hardest to reach through Nibble's own screens: Start and End
+  are never both drawn, because which one you see is decided by the state. It
+  takes two tabs, or something driving the API directly. Fixed on consequence
+  rather than likelihood.
 - **A paper stored after the class ended.** The teacher presses End between the
   state check and the insert. This is the one that matters: it breaks the thing
   `closed` exists to guarantee, and it puts a submission that arrived too late
@@ -2702,7 +2715,17 @@ though only two could do damage worth the name:
   same millisecond, so it will realistically never happen. Fixed because what it
   did when it happened was hand a teacher a traceback.
 
-**Two different fixes, because the two situations are not the same.**
+**Three different fixes, because they are three different situations.**
+
+Where the write *is* the thing that has to be conditional — moving a room from
+one state to the next — the condition goes into the write:
+`UPDATE rooms SET state = ? WHERE id = ? AND state = ?`. A compare-and-set. The
+row only moves if it is still where the check found it, so the rule "a room only
+ever moves forward" stops being something the code checks and becomes something
+the write cannot break. No retry loop is needed to settle it: every writer here
+only moves forwards, so a compare-and-set that fails means somebody else moved
+it forwards, and one more look says whether that landed where this request
+wanted or past it.
 
 Where a constraint already answers the question — a duplicate paper, a duplicate
 code — the constraint is what gets asked, and the error it raises is caught and
@@ -2722,7 +2745,7 @@ been the same race a second time.
 **No contract changed.** Every status and sentence in `api.md` already covered
 these; what changed is that the code now delivers them instead of a 500.
 
-**Five tests, and what they do not prove.** None of these can be provoked by
+**Eight tests, and what they do not prove.** None of these can be provoked by
 timing a real request, so each test forces the interleaving instead — the second
 look at the world is made to return what it would have returned had the race
 happened. That proves the handling is right, and for two of them that the
@@ -2731,7 +2754,7 @@ window is as narrow as the comments claim. Nothing in a test suite can.
 
 ### Checked by running it, and what that does and does not prove
 
-- **315 backend tests pass**, 45 of them new. The four rules from the plan each
+- **318 backend tests pass**, 48 of them new. The four rules from the plan each
   have a test, and the answer-key one asserts on the **keys** of the response
   rather than on a value — the way that rule breaks is a field arriving that
   nobody meant to send, and `correct != 1` would not notice a `dict(row)`.
