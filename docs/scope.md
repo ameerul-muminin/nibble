@@ -1671,10 +1671,17 @@ laptop.
 
 ### Still needing a person
 
-- [ ] **The actual deploy.** Everything here is verified locally. Nobody has
-      created the Render service or the Vercel project yet, and a deploy that has
-      not run is a deploy that does not work. [`deploying.md`](./deploying.md) is
-      the script to follow.
+- [x] **The actual deploy, done 2026-09-08.** Backend on Render at
+      <https://nibble-d75e.onrender.com>, frontend on Vercel at
+      <https://nibble-two-beta.vercel.app>, and `CORS_ORIGINS` set so the two can
+      talk. Checked against the running services rather than assumed: `/health`
+      answers 200 with no token, `/documents` and `/ask` answer 401 without one,
+      and a CORS preflight from the Vercel origin comes back allowing exactly that
+      origin — not a wildcard.
+- [ ] **Nobody has opened the deployed site in a browser.** Everything above is
+      HTTP-level, which says nothing about whether the page renders. This is the
+      same gap slices 2, 3 and 4 each left behind, arriving by a third route: a
+      green check is not a person having looked.
 - [ ] **Time one real upload on Render.** The free tier gives 0.1 of a CPU and
       every timing in this project was measured on a laptop. Nobody knows yet how
       slow embedding is on a fraction of a shared core. This is the open risk in
