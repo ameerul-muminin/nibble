@@ -145,30 +145,58 @@ export function QuizMe({ docs, onNoteGone }) {
     }
   }
 
+  // Both handlers below capture `quizId` before the request and check it again
+  // when the reply lands, and that guard is doing real work rather than being
+  // defensive out of habit.
+  //
+  // Press Save and then "← All quizzes" before the reply arrives, and `open` is
+  // null by the time it does. The old version spread it — `{...null}` is `{}` —
+  // and then read `.questions` off that, which throws during render. Open a
+  // DIFFERENT quiz in that window and it was worse than a crash: the reply was
+  // applied to whichever quiz happened to be open, so a question from one quiz
+  // appeared in another and the change looked saved when it was not.
+  //
+  // Comparing ids inside the updater is what makes it safe, because the updater
+  // is handed the state as it is NOW rather than as it was when the request
+  // started.
+
   async function handleSaveQuestion(questionId, changes) {
+    const quizId = open.id
     setNotice(null)
     try {
-      const updated = await updateQuestion(open.id, questionId, changes)
-      setOpen((current) => ({
-        ...current,
-        questions: current.questions.map((q) => (q.id === questionId ? updated : q)),
-      }))
+      const updated = await updateQuestion(quizId, questionId, changes)
+      setOpen((current) =>
+        current?.id === quizId
+          ? {
+              ...current,
+              questions: current.questions.map((q) => (q.id === questionId ? updated : q)),
+            }
+          : current,
+      )
     } catch (error) {
       setNotice(error?.message || 'Nibble could not save that change.')
     }
   }
 
   async function handleDeleteQuestion(questionId) {
+    const quizId = open.id
     setNotice(null)
     try {
-      await deleteQuestion(open.id, questionId)
-      setOpen((current) => ({
-        ...current,
-        questions: current.questions.filter((q) => q.id !== questionId),
-      }))
+      await deleteQuestion(quizId, questionId)
+      setOpen((current) =>
+        current?.id === quizId
+          ? {
+              ...current,
+              questions: current.questions.filter((q) => q.id !== questionId),
+            }
+          : current,
+      )
+      // The count in the list is corrected whichever quiz is open now — the
+      // deletion really happened, so the row should show it even if you have
+      // navigated back to the list to look at it.
       setQuizzes((current) =>
         current.map((quiz) =>
-          quiz.id === open.id ? { ...quiz, question_count: quiz.question_count - 1 } : quiz,
+          quiz.id === quizId ? { ...quiz, question_count: quiz.question_count - 1 } : quiz,
         ),
       )
     } catch (error) {

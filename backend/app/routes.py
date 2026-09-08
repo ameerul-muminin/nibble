@@ -17,6 +17,7 @@ testable without starting a server.
 """
 
 import json
+import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Literal
@@ -1032,10 +1033,31 @@ def create_quiz(request: QuizRequest, user_id: str = Depends(current_user_id)):
     created_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S")
     db = get_db()
     try:
-        cursor = db.execute(
-            "INSERT INTO quizzes (user_id, document_id, title, created_at) VALUES (?, ?, ?, ?)",
-            (user_id, request.document_id, title, created_at),
-        )
+        # **The note was checked before the model call, and this is after it.**
+        # In between, several seconds passed with no connection open — long
+        # enough for another tab to delete that note. The foreign key is ON, so
+        # inserting against a document that is gone raises IntegrityError, and
+        # uncaught that is a 500 with a traceback for something the person did
+        # deliberately in the next window along.
+        #
+        # Catching rather than re-checking, because a re-check is the same race
+        # one line further down: the note could go between the SELECT and the
+        # INSERT. The constraint is the only thing that can answer this without
+        # a gap, so the constraint is what gets asked.
+        try:
+            cursor = db.execute(
+                "INSERT INTO quizzes (user_id, document_id, title, created_at) VALUES (?, ?, ?, ?)",
+                (user_id, request.document_id, title, created_at),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=(
+                    "That note was deleted while Nibble was writing the questions, "
+                    "so there is nothing to attach them to."
+                ),
+            ) from exc
+
         quiz_id = cursor.lastrowid
 
         db.executemany(
@@ -1181,6 +1203,20 @@ def update_question(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="None of the options can be blank.",
+            )
+        # The same rule quiz._validate_one applies to a generated question, and
+        # it was missing here — so a question Nibble would have refused to write
+        # could be typed in by hand. Two identical options means two identical
+        # buttons where only one of them scores, which is unanswerable and reads
+        # as the app being broken rather than the question being bad.
+        #
+        # Worth stating as a principle: an edit must not be able to produce a
+        # question that generation would have thrown away. Anywhere those two
+        # sets of rules disagree, the looser one is a bug.
+        if len({option.strip() for option in patch.options}) != quiz.OPTION_COUNT:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Every option has to be different from the others.",
             )
 
     if patch.correct is not None and not 0 <= patch.correct < quiz.OPTION_COUNT:

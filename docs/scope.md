@@ -2277,6 +2277,48 @@ list on that page, with one plausible non-member. That is what
 higher than `/ask`'s — at "low" a model writes one plausible wrong option and two
 throwaways, and the quiz marks itself.
 
+### Three defects found by review, all fixed
+
+**A note deleted mid-generation was a 500.** `create_quiz` checks the note, then
+closes the connection and spends several seconds calling the model, then inserts.
+Another tab deleting that note in the gap made the foreign key refuse the insert,
+and an uncaught `sqlite3.IntegrityError` became a traceback for something
+somebody had done deliberately. Now caught, and answered as a 404 saying the note
+went away while the questions were being written.
+
+Caught rather than re-checked, and that is the interesting half: a second SELECT
+is the same race one line further down, because the note can still go between the
+check and the insert. **The constraint is the only thing that can answer without
+a gap, so the constraint is what gets asked.**
+
+**An edit could make a question the generator would have refused.**
+`quiz._validate_one` rejects duplicate options — two identical buttons where only
+one scores is unanswerable, and reads as a broken app rather than a bad question
+— but `PATCH` did not. The rule to keep: **an edit must never be able to produce
+a question generation would have thrown away.** Anywhere those two sets of rules
+disagree, the looser one is the bug.
+
+**A slow save applied to the wrong quiz.** In `QuizMe.jsx`, saving or deleting a
+question and then leaving before the reply landed spread `open` while it was
+`null` — `{...null}` is `{}`, and reading `.questions` off that throws during
+render. Opening a *different* quiz in that window was worse than a crash: the
+reply was applied to whichever quiz was open, so a question from one appeared in
+another and the change looked saved when it was not. Both handlers now capture
+the id and compare it inside the state updater, which sees the state as it is
+now rather than as it was when the request started.
+
+### The stale backend, and why the message was right
+
+The quiz card first came back with *"Nibble's backend doesn't know about that
+yet. It's probably running an older version."* It was — a `uvicorn` started
+without `--reload` the day before, so it had no `/quizzes` routes and returned
+404, which `api.js` reads exactly right.
+
+Worth keeping as the counter-example to the error-message work under Slice 4.6:
+that message cost no time at all, because it named the actual cause and the fix.
+The database one cost real time because a good sentence was thrown away three
+times before it reached anybody.
+
 **Not yet opened in a browser.** The API is proven against real Groq and the card
 is proven by lint and build, which is not the same claim — the exact gap that let
 slice 4 ship its bugs.

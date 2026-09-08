@@ -425,3 +425,68 @@ def test_deleting_somebody_elses_quiz_is_404(client, signed_in_as):
     # Back as the owner: the quiz survived somebody else's delete.
     signed_in_as(TEST_USER_ID)
     assert client.get(f"/quizzes/{quiz_id}").status_code == 200
+
+
+def test_the_note_being_deleted_mid_generation_is_a_sentence_not_a_500(client, monkeypatch):
+    """Generation takes seconds with no connection open. A tab can delete the
+    note in that window, and the foreign key then refuses the insert. Uncaught
+    that is a 500 with a traceback for something somebody did deliberately."""
+    doc = _upload(client).json()
+
+    def delete_it_mid_flight(context, count, pages):
+        client.delete(f"/documents/{doc['id']}")
+        return _questions(3)
+
+    monkeypatch.setattr("app.routes.quiz.make_questions", delete_it_mid_flight)
+
+    response = _make_quiz(client, doc["id"])
+
+    assert response.status_code == 404
+    assert "deleted while" in response.json()["detail"]
+
+
+def test_a_note_deleted_mid_generation_leaves_no_half_quiz(client, monkeypatch):
+    doc = _upload(client).json()
+
+    def delete_it_mid_flight(context, count, pages):
+        client.delete(f"/documents/{doc['id']}")
+        return _questions(3)
+
+    monkeypatch.setattr("app.routes.quiz.make_questions", delete_it_mid_flight)
+    _make_quiz(client, doc["id"])
+
+    assert client.get("/quizzes").json() == []
+
+
+def test_duplicate_options_are_refused_on_an_edit(client):
+    """quiz._validate_one already refuses these when the model writes them.
+
+    An edit must not be able to produce a question that generation would have
+    thrown away: two identical buttons where only one scores is unanswerable,
+    and reads as the app being broken rather than the question being bad.
+    """
+    doc = _upload(client).json()
+    body = _make_quiz(client, doc["id"]).json()
+    qid = body["questions"][0]["id"]
+
+    response = client.patch(
+        f"/quizzes/{body['id']}/questions/{qid}",
+        json={"options": ["Same", "Same", "C", "D"], "correct": 0},
+    )
+
+    assert response.status_code == 400
+    assert "different" in response.json()["detail"]
+
+
+def test_duplicate_options_that_differ_only_in_spacing_are_also_refused(client):
+    """They are stored stripped, so these would land as duplicates."""
+    doc = _upload(client).json()
+    body = _make_quiz(client, doc["id"]).json()
+    qid = body["questions"][0]["id"]
+
+    response = client.patch(
+        f"/quizzes/{body['id']}/questions/{qid}",
+        json={"options": ["Osmosis", "  Osmosis  ", "C", "D"], "correct": 0},
+    )
+
+    assert response.status_code == 400
