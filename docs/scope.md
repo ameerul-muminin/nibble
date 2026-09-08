@@ -2350,10 +2350,39 @@ harder case, and that is the first knob to turn if distractors come back weak �
 with a measurement next time, not an assertion.
 
 Verified end to end afterwards: ten questions asked for, ten returned, every
-page real. **The visible cost of the smaller context is that they came from
-pages 1-3 of an 11-page note.** Questions come from the beginning of a long
-note, which the prompt is honest about. The real fix is quizzing a section
-rather than a chapter, and that is a slice rather than a number.
+page real.
+
+### Which part of the note goes in, which turned out to matter more than how much
+
+Shrinking the context to fix the 429 had a cost that only showed up when the
+pages were counted: **an 11-page note produced a context covering pages 1, 2 and
+3.** Every question in a quiz about the whole lab came from its first quarter.
+Somebody revising from it would learn the beginning of everything and the end of
+nothing, and nothing on screen would say so.
+
+The cause was that `build_prompt` took the note **from the front** until the
+budget ran out. That was written when the budget was 12,000 characters and
+usually swallowed the whole document, so it was invisible — halving the budget
+made it the dominant behaviour.
+
+Now it takes an **even spread across the whole note**. Identical token cost,
+because the same number of pieces goes in; they are simply drawn from the length
+of the document rather than the start of it. When a note fits inside the budget,
+all of it goes in and the spread does nothing, which is the common case.
+
+Measured on the same 11-page note, same budget:
+
+| | pages reaching the model |
+| --- | --- |
+| from the front | 1, 2, 3 |
+| evenly spread | 1, 2, 3, 4, 5, 6, 8 |
+
+And in a real ten-question quiz, the questions came from pages 1, 2, 3, 4, 6 and
+8 — diode logic, RTL, DTL, the Johnson counter and the zero-crossing detector,
+instead of three questions about experiment 1.
+
+The gaps are real: this is a sample of a long note, not all of it. Quizzing a
+chosen section is still the proper answer, and still a slice rather than a knob.
 
 **A better 429, too.** Groq says exactly when the budget returns, and we were
 discarding it and guessing "in a moment" — the wrong advice when the honest
@@ -2373,6 +2402,22 @@ reply only writes if its number is still current. **That is now three bugs in
 this component from the same root** — a reply landing after the thing it was for
 stopped being what anybody wanted. Worth remembering as a shape rather than
 three separate fixes.
+
+**And then the fix itself was too blunt**, which review caught next. Deleting a
+quiz bumped the counter unconditionally, so deleting quiz B silently cancelled
+an open of quiz A that was still in flight: nothing appeared, and nothing said
+why. A cancellation with no message is worse than the bug it was guarding
+against, because there is nothing to react to.
+
+A delete now cancels a load only when it is *the same quiz* — tracked with an
+`openingId` ref alongside the counter. Deleting one quiz is not an opinion about
+a different one. Making a quiz and pressing "All quizzes" still cancel
+unconditionally, because both of those *are* explicit statements about what
+should be on screen.
+
+The lesson is about the guard rather than the bug: **"ignore stale replies" has
+to mean stale, not merely older.** A counter alone cannot tell those apart when
+several unrelated things share it.
 
 ### The stale backend, and why the message was right
 

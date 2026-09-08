@@ -73,6 +73,11 @@ export function QuizMe({ docs, onNoteGone }) {
   // bookkeeping about renders, not something to draw.
   const openRun = useRef(0)
 
+  // Which quiz `handleOpen` is currently fetching, or null when nothing is in
+  // flight. It exists so a delete can tell whether it is interfering with a
+  // load or is unrelated to it — see handleDeleteQuiz.
+  const openingId = useRef(null)
+
   useEffect(() => {
     let ignore = false
 
@@ -103,9 +108,11 @@ export function QuizMe({ docs, onNoteGone }) {
     if (!noteId || !name) return
 
     // Claims the newest run, so a quiz still loading cannot land on top of the
-    // one being made here. See openRun above.
+    // one being made here. Unconditional, unlike the delete below, because
+    // making a quiz IS a request to put that quiz on screen. See openRun above.
     const run = openRun.current + 1
     openRun.current = run
+    openingId.current = null
 
     setBusy(true)
     setNotice(null)
@@ -150,6 +157,7 @@ export function QuizMe({ docs, onNoteGone }) {
   async function handleOpen(id, nextMode) {
     const run = openRun.current + 1
     openRun.current = run
+    openingId.current = id
 
     setNotice(null)
     try {
@@ -166,13 +174,32 @@ export function QuizMe({ docs, onNoteGone }) {
     } catch (error) {
       if (openRun.current !== run) return
       setNotice(error?.message || 'Nibble could not open that quiz.')
+    } finally {
+      // Only clear it if this is still the load in progress. A newer open will
+      // have overwritten it, and clearing then would tell a later delete that
+      // nothing is loading when something is.
+      if (openRun.current === run) {
+        openingId.current = null
+      }
     }
   }
 
   async function handleDeleteQuiz(id) {
-    // A delete is also an intent about what should be on screen: without this,
-    // deleting a quiz that was still loading let its reply reopen it.
-    openRun.current += 1
+    // A delete cancels a load **only when it is the same quiz**, and that
+    // condition is the whole point of this line.
+    //
+    // Bumping unconditionally was the first version, and it was too blunt: it
+    // made deleting quiz B silently cancel an open of quiz A that was still in
+    // flight. Nothing appeared, and nothing said why — the worst kind of
+    // failure, because there is nothing to react to. Deleting one quiz is not
+    // an opinion about a different one.
+    //
+    // Deleting the quiz that IS loading still has to cancel it, or its reply
+    // arrives afterwards and reopens something that no longer exists.
+    if (openingId.current === id) {
+      openRun.current += 1
+      openingId.current = null
+    }
 
     setNotice(null)
     try {
@@ -415,8 +442,11 @@ export function QuizMe({ docs, onNoteGone }) {
               className="btn btn--secondary"
               onClick={() => {
                 // Going back is an intent too: a quiz still loading must not
-                // reopen itself after you have left. See openRun above.
+                // reopen itself after you have left. Unconditional for the same
+                // reason as making one — this is explicitly about what should be
+                // on screen. See openRun above.
                 openRun.current += 1
+                openingId.current = null
                 setOpen(null)
               }}
             >

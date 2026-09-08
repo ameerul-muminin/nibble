@@ -134,21 +134,56 @@ def build_prompt(chunks: list[dict]) -> str:
     quietly drifting later.
 
     Unlike ``/ask`` there is no query to retrieve against: "write five questions
-    about this chapter" has no question to match chunks to. So this takes the
-    note from the beginning until ``QUIZ_MAX_CONTEXT_CHARS`` runs out. For most
-    chapters that is all of it; for a very long one the questions come from the
-    start, which is predictable, and the prompt says so rather than letting the
-    model imply it covered the end.
-    """
-    kept: list[dict] = []
-    budget = config.QUIZ_MAX_CONTEXT_CHARS
+    about this chapter" has no question to match chunks to. So a budget decides
+    how much of the note goes in — and **which** part is the interesting bit.
 
-    for chunk in chunks:
+    **It takes an even spread across the whole note, not the first N characters.**
+    Taking the front was the first version and it was measurably bad: on an
+    11-page note the budget covered pages 1 to 3, so every question in a quiz
+    about the chapter came from its first quarter, and pages 4 to 11 could not
+    be asked about at all. A student would revise the beginning of everything
+    and the end of nothing.
+
+    Spreading costs exactly the same number of tokens and covers the whole
+    document. When the note fits, all of it goes in and the spread does nothing.
+
+    Order is preserved, so the model still reads the note forwards. The gaps
+    between kept pieces are real — this is a sample, not the whole chapter — and
+    that is the honest trade for a budget. Quizzing a chosen section is the
+    proper answer and is a slice of its own.
+    """
+    if not chunks:
+        return ""
+
+    budget = config.QUIZ_MAX_CONTEXT_CHARS
+    total = sum(len(chunk["content"]) for chunk in chunks)
+
+    # It all fits. No sampling, no cleverness, and this is the common case — a
+    # normal chapter is well under the budget.
+    if total <= budget:
+        return llm.build_context(chunks)
+
+    # Roughly how many pieces the budget buys, using the average length rather
+    # than measuring each one. Approximate on purpose: the exact figure is
+    # trimmed below anyway, and an average keeps this one readable line.
+    average = total / len(chunks)
+    room = max(1, int(budget // average))
+
+    # Evenly spaced positions across the whole note, first to last. `step` as a
+    # float and rounded per pick, so the spread stays even instead of drifting
+    # and bunching everything at the front.
+    step = len(chunks) / room
+    picked = [chunks[min(len(chunks) - 1, int(i * step))] for i in range(room)]
+
+    # The average could have been generous, so trim to the real budget.
+    kept: list[dict] = []
+    left = budget
+    for chunk in picked:
         cost = len(chunk["content"])
-        if kept and cost > budget:
+        if kept and cost > left:
             break
         kept.append(chunk)
-        budget -= cost
+        left -= cost
 
     return llm.build_context(kept)
 

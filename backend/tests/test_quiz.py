@@ -100,6 +100,52 @@ def test_build_prompt_stops_at_the_context_budget(monkeypatch):
     assert "p.5" not in built
 
 
+def test_build_prompt_spreads_across_the_whole_note(monkeypatch):
+    """The first version took the front, and that was measurably bad.
+
+    On an 11-page note the budget covered pages 1-3, so every question came from
+    the first quarter and pages 4-11 could not be asked about at all. Spreading
+    costs exactly the same tokens and covers the document.
+    """
+    monkeypatch.setattr(config, "QUIZ_MAX_CONTEXT_CHARS", 300)
+    chunks = [{"filename": "bio.pdf", "page": page, "content": "x" * 100} for page in range(1, 11)]
+
+    built = quiz.build_prompt(chunks)
+    pages = sorted(
+        int(line.split("p.")[1].rstrip("]")) for line in built.splitlines() if line.startswith("[")
+    )
+
+    assert len(pages) == 3, f"budget buys three pieces, got {pages}"
+    # Reaches the back of the note rather than stopping at the front.
+    assert max(pages) > 5, f"never got past the beginning: {pages}"
+    assert pages == sorted(pages), "reading order must be preserved"
+
+
+def test_build_prompt_sends_everything_when_it_fits(monkeypatch):
+    """The common case. A normal chapter is well under the budget."""
+    monkeypatch.setattr(config, "QUIZ_MAX_CONTEXT_CHARS", 10_000)
+    chunks = [{"filename": "bio.pdf", "page": page, "content": "x" * 100} for page in range(1, 6)]
+
+    built = quiz.build_prompt(chunks)
+
+    assert all(f"p.{page}]" in built for page in range(1, 6))
+
+
+def test_build_prompt_never_exceeds_the_budget(monkeypatch):
+    monkeypatch.setattr(config, "QUIZ_MAX_CONTEXT_CHARS", 500)
+    chunks = [{"filename": "bio.pdf", "page": page, "content": "x" * 100} for page in range(1, 21)]
+
+    body = sum(
+        len(line) for line in quiz.build_prompt(chunks).splitlines() if not line.startswith("[")
+    )
+
+    assert body <= 500
+
+
+def test_build_prompt_of_nothing_is_empty():
+    assert quiz.build_prompt([]) == ""
+
+
 def test_build_prompt_keeps_one_chunk_even_if_it_blows_the_budget(monkeypatch):
     """A note whose first piece is over budget should still make a quiz."""
     monkeypatch.setattr(config, "QUIZ_MAX_CONTEXT_CHARS", 10)
