@@ -254,6 +254,20 @@ QUIZ_MAX_QUESTIONS = 10
 # effort now used, so a long question cannot truncate one again.
 QUIZ_MAX_OUTPUT_TOKENS = 2000
 
+# How many times to ask again when Groq rejects the model's own JSON.
+#
+# `response_format: json_object` makes Groq check the reply before sending it,
+# and occasionally the model writes something that does not pass. It comes back
+# as a 400 with the code `json_validate_failed` — and it is **intermittent**:
+# the same note and the same count succeed on the next attempt, which is what
+# makes it worth retrying rather than reporting.
+#
+# Retried straight away, with no wait, unlike OCR_RETRY_WAIT_SECONDS below. That
+# wait exists because a rate limit needs time to pass. This is not a rate limit
+# and nothing improves by pausing — somebody is watching a spinner, and three
+# quick attempts are cheaper than one failure they have to react to.
+QUIZ_RETRY_ATTEMPTS = 3
+
 # How much of the note the model is shown when writing questions.
 #
 # A quiz is made from ONE note, and unlike /ask there is no question to retrieve

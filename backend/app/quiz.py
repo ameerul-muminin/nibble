@@ -210,39 +210,28 @@ def make_questions(context: str, count: int, pages: set[int]) -> list[dict]:
             "at https://console.groq.com/keys and put it in backend/.env"
         )
 
-    try:
-        response = requests.post(
-            f"{config.GROQ_BASE_URL}/chat/completions",
-            headers={"Authorization": f"Bearer {config.GROQ_API_KEY}"},
-            json={
-                "model": config.CHAT_MODEL,
-                "messages": [
-                    {"role": "system", "content": QUIZ_SYSTEM_PROMPT},
-                    {
-                        "role": "user",
-                        "content": (
-                            f"Here are my notes:\n\n{context}\n\n"
-                            f"Write {count} multiple-choice questions from them."
-                        ),
-                    },
-                ],
-                # Asking the API itself to guarantee JSON, rather than hoping the
-                # prompt is obeyed. It removes the most common failure — a model
-                # wrapping perfectly good JSON in ```json fences or a sentence of
-                # preamble — without removing the need for the validator below,
-                # which is about the SHAPE being right, not the syntax.
-                "response_format": {"type": "json_object"},
-                # Lower than llm.py's 0.2. A quiz has no voice to get right, and
-                # the variation that makes an answer read naturally makes a
-                # question's distractors wander.
-                "temperature": 0.1,
-                "max_tokens": config.QUIZ_MAX_OUTPUT_TOKENS,
-                "reasoning_effort": config.QUIZ_REASONING_EFFORT,
-            },
-            timeout=_TIMEOUT_SECONDS,
-        )
-    except requests.RequestException as exc:
-        raise QuizUnavailable(f"Could not reach the question writer: {exc}") from exc
+    # Ask, and ask again if Groq rejects the model's own JSON.
+    #
+    # `response_format` makes Groq validate the reply before sending it, and now
+    # and then the model writes something that does not pass. That arrives as a
+    # 400 with the code `json_validate_failed`, and it is intermittent — the
+    # same note and count succeed on the next attempt. It was reaching people as
+    # "The question writer answered with 400.", which is both useless and wrong
+    # about whose problem it is.
+    #
+    # Only that one code is retried. Every other 400 means the request itself is
+    # wrong, which is our bug, and sending it three times makes it neither
+    # righter nor easier to find.
+    for attempt in range(config.QUIZ_RETRY_ATTEMPTS):
+        response = _ask(context, count)
+
+        if not (response.status_code == 400 and _is_json_validate_failure(response)):
+            break
+
+        if attempt == config.QUIZ_RETRY_ATTEMPTS - 1:
+            raise QuizUnavailable(
+                "Nibble's questions came out garbled a few times in a row. Try again."
+            )
 
     if response.status_code == 429:
         # The same split as llm.py and ocr.py: "too fast just now" and "nothing
@@ -279,6 +268,61 @@ def make_questions(context: str, count: int, pages: set[int]) -> list[dict]:
         )
 
     return questions[:count]
+
+
+def _is_json_validate_failure(response) -> bool:
+    """Is this the intermittent "the model's JSON did not pass" 400?
+
+    Checked by error code rather than by matching the message text, because the
+    message is prose Groq is free to reword and the code is the part they
+    promise. Falls back to the raw body if the reply is not JSON at all — a 400
+    with no readable body is not something to retry blindly.
+    """
+    try:
+        return response.json().get("error", {}).get("code") == "json_validate_failed"
+    except ValueError:
+        return False
+
+
+def _ask(context: str, count: int):
+    """One attempt at asking for a quiz. Returns the raw response, good or bad.
+
+    Split out so the retry above reads as a loop over attempts rather than a
+    loop wrapped around forty lines of request body.
+    """
+    try:
+        return requests.post(
+            f"{config.GROQ_BASE_URL}/chat/completions",
+            headers={"Authorization": f"Bearer {config.GROQ_API_KEY}"},
+            json={
+                "model": config.CHAT_MODEL,
+                "messages": [
+                    {"role": "system", "content": QUIZ_SYSTEM_PROMPT},
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Here are my notes:\n\n{context}\n\n"
+                            f"Write {count} multiple-choice questions from them."
+                        ),
+                    },
+                ],
+                # Asking the API itself to guarantee JSON, rather than hoping the
+                # prompt is obeyed. It removes the most common failure — a model
+                # wrapping perfectly good JSON in ```json fences or a sentence of
+                # preamble — without removing the need for the validator below,
+                # which is about the SHAPE being right, not the syntax.
+                "response_format": {"type": "json_object"},
+                # Lower than llm.py's 0.2. A quiz has no voice to get right, and
+                # the variation that makes an answer read naturally makes a
+                # question's distractors wander.
+                "temperature": 0.1,
+                "max_tokens": config.QUIZ_MAX_OUTPUT_TOKENS,
+                "reasoning_effort": config.QUIZ_REASONING_EFFORT,
+            },
+            timeout=_TIMEOUT_SECONDS,
+        )
+    except requests.RequestException as exc:
+        raise QuizUnavailable(f"Could not reach the question writer: {exc}") from exc
 
 
 def _validate(raw: str, pages: set[int]) -> list[dict]:

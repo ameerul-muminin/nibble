@@ -355,3 +355,96 @@ def test_a_server_error_does_not_leak_the_providers_own_words(monkeypatch):
         quiz.make_questions("notes", 5, PAGES)
 
     assert "billing" not in str(caught.value)
+
+
+# ---------------------------------------------------------------------------
+# Groq rejecting the model's own JSON
+# ---------------------------------------------------------------------------
+#
+# response_format makes Groq validate the reply before sending it, and now and
+# then the model writes something that does not pass. It arrives as a 400 with
+# the code json_validate_failed, and it is INTERMITTENT — the same note and
+# count succeed on the next attempt. It was reaching people as "The question
+# writer answered with 400.", which is useless and wrong about whose problem it
+# is.
+
+
+def _json_invalid():
+    return _FakeResponse(
+        status_code=400,
+        payload={"error": {"code": "json_validate_failed", "message": "Failed to validate JSON."}},
+    )
+
+
+def _sequence(monkeypatch, responses):
+    """Answer with each response in turn, and count the attempts."""
+    calls = {"n": 0}
+
+    def fake_post(url, **kwargs):
+        response = responses[min(calls["n"], len(responses) - 1)]
+        calls["n"] += 1
+        return response
+
+    monkeypatch.setattr(quiz.requests, "post", fake_post)
+    return calls
+
+
+def test_a_rejected_json_reply_is_asked_again(monkeypatch):
+    calls = _sequence(monkeypatch, [_json_invalid(), _reply([_question()])])
+
+    questions = quiz.make_questions("notes", 1, PAGES)
+
+    assert calls["n"] == 2
+    assert len(questions) == 1
+
+
+def test_it_gives_up_after_the_configured_attempts(monkeypatch):
+    calls = _sequence(monkeypatch, [_json_invalid()])
+
+    with pytest.raises(quiz.QuizUnavailable, match="garbled"):
+        quiz.make_questions("notes", 5, PAGES)
+
+    assert calls["n"] == config.QUIZ_RETRY_ATTEMPTS
+
+
+def test_the_giving_up_message_never_mentions_a_400(monkeypatch):
+    """ "The question writer answered with 400" is not something to act on."""
+    _sequence(monkeypatch, [_json_invalid()])
+
+    with pytest.raises(quiz.QuizUnavailable) as caught:
+        quiz.make_questions("notes", 5, PAGES)
+
+    assert "400" not in str(caught.value)
+
+
+def test_any_other_400_is_not_retried(monkeypatch):
+    """A different 400 means our request is wrong. Sending it again is noise."""
+    other = _FakeResponse(
+        status_code=400,
+        payload={"error": {"code": "model_not_found", "message": "no such model"}},
+    )
+    calls = _sequence(monkeypatch, [other])
+
+    with pytest.raises(quiz.QuizUnavailable):
+        quiz.make_questions("notes", 5, PAGES)
+
+    assert calls["n"] == 1
+
+
+def test_a_400_with_no_readable_body_is_not_retried(monkeypatch):
+    calls = _sequence(monkeypatch, [_FakeResponse(status_code=400, text="gateway nonsense")])
+
+    with pytest.raises(quiz.QuizUnavailable):
+        quiz.make_questions("notes", 5, PAGES)
+
+    assert calls["n"] == 1
+
+
+def test_a_rate_limit_is_not_retried_here(monkeypatch):
+    """Somebody is waiting. A wait long enough to help looks like a hang."""
+    calls = _sequence(monkeypatch, [_FakeResponse(status_code=429, text="rate limit")])
+
+    with pytest.raises(quiz.QuizUnavailable):
+        quiz.make_questions("notes", 5, PAGES)
+
+    assert calls["n"] == 1

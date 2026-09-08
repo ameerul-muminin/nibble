@@ -2419,6 +2419,34 @@ The lesson is about the guard rather than the bug: **"ignore stale replies" has
 to mean stale, not merely older.** A counter alone cannot tell those apart when
 several unrelated things share it.
 
+### The 400 came back, and this time it was intermittent
+
+A quiz on the 31-page database chapter failed with **"The question writer
+answered with 400."** — which is both useless to read and wrong about whose
+problem it is.
+
+Underneath was `json_validate_failed` again, but **not** the truncation fixed
+above. `response_format: json_object` makes Groq validate the reply before
+sending it, and now and then the model writes something that does not pass.
+Reproducing it showed the point: the very next attempt, same note, same count,
+came back `200` using 555 of its 2,000 tokens. Nothing was too big. The model
+simply wrote bad JSON once.
+
+So it is retried, three times, with no wait — the same shape as
+`OCR_RETRY_ATTEMPTS`, minus the pause, because that pause exists for rate limits
+and nothing here improves by waiting while somebody watches a spinner.
+
+**Only that one error code is retried**, checked by code rather than by matching
+message text. Every other 400 means the request itself is wrong, which is our
+bug, and sending it three times makes it neither righter nor easier to find. A
+429 is not retried here either — a wait long enough to help would look like a
+hang.
+
+Checked by running it three times in a row on the chapter that failed: **3/3
+succeeded, ten questions each, drawn from pages 3 to 29 of 31.** That last part
+is the even spread working on prose, which also answers the caveat left above
+about the quality check having been done on a multiple-choice bank.
+
 ### The stale backend, and why the message was right
 
 The quiz card first came back with *"Nibble's backend doesn't know about that
