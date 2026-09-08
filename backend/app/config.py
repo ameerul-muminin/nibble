@@ -23,6 +23,29 @@ DATABASE_FILE = os.getenv("DATABASE_FILE", "nibble.db")
 EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
 EMBEDDING_DIM = 384  # this model turns any text into exactly 384 numbers
 
+# How many pieces the model is given at once.
+#
+# This is a memory setting, not a speed one, and it is the difference between
+# the backend fitting on a free host and being killed by it. `fastembed`
+# defaults to 256, and the whole upload is handed over in one call — so peak
+# memory grows with the size of the document rather than staying put.
+#
+# Measured on real 900-character English, embedding a 400-piece document:
+#
+#     batch_size=256 (the default)   1275 MB
+#     batch_size=32                   473 MB
+#     batch_size=16                   341 MB
+#     batch_size=8                    278 MB
+#
+# Every one of those took the same ~30 seconds, so the smaller batch is free.
+# 8 was chosen because the deploy target has 512 MB and the idle backend with
+# the model loaded is already 227 MB of it.
+#
+# The thing worth understanding: this makes memory *flat*. At 8, a 40-piece
+# chapter and a 400-piece book both peak at the same number. Without it, the
+# ceiling is whatever the biggest file anybody uploads happens to be.
+EMBED_BATCH_SIZE = 8
+
 # --- The language model (slice 4) ----------------------------------------
 # Groq runs open-source models for free. Get a key (no card needed) at
 # https://console.groq.com/keys and put it in your .env file.

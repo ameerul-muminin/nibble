@@ -6,14 +6,16 @@ If you get stuck following it, **the document is wrong** — fix it for the next
 person.
 
 Nibble deploys to two places, and it has to, because the two halves need
-different things. [`adr/0003-hosting.md`](./adr/0003-hosting.md) is the full
-reasoning; the short version is that the frontend is a folder of files and the
-backend needs a real computer with a real disk.
+different things. [`adr/0003-hosting.md`](./adr/0003-hosting.md) is why the
+backend cannot go where the frontend goes, and
+[`adr/0005-render.md`](./adr/0005-render.md) is why it goes to Render. The short
+version is that the frontend is a folder of files and the backend needs a real
+computer with a real disk.
 
 | Half | Goes to | Why |
 | --- | --- | --- |
 | `frontend/` | Vercel | It is a pile of static files. This is what Vercel is for. |
-| `backend/` | A Hugging Face Space | It needs a filesystem for `nibble.db` and room for the embedding model. |
+| `backend/` | Render | It needs a filesystem for `nibble.db` and room for the embedding model. |
 
 **Everything below is free and none of it asks for a card.**
 
@@ -24,80 +26,90 @@ does not need the frontend's until the very end.
 
 ## Before you start
 
-You need three accounts, all free: [Hugging Face](https://huggingface.co/join),
-[Vercel](https://vercel.com/signup), and the project's existing
-[Clerk](https://dashboard.clerk.com/) and [Groq](https://console.groq.com/keys)
-logins. Ask Alif for the Clerk and Groq ones rather than making new ones — a new
-Clerk application means new keys and a different set of users.
+You need two accounts, both free and neither asking for a card:
+[Render](https://render.com/register) and [Vercel](https://vercel.com/signup).
+You also need the project's existing [Clerk](https://dashboard.clerk.com/) and
+[Groq](https://console.groq.com/keys) logins — ask Alif for those rather than
+making new ones, because a new Clerk application means new keys and a different
+set of users.
+
+> **This used to say Hugging Face.** A free Docker Space was the plan until
+> Hugging Face made the Docker SDK a paid feature in July 2026, with no
+> announcement. Everything in this project is free, so the backend moved to
+> Render. [`adr/0005-render.md`](./adr/0005-render.md) is the reasoning, and it
+> is worth two minutes before you start — it explains the one thing about the
+> free tier that will surprise you.
 
 ---
 
-## Part 1 — the backend, on a Hugging Face Space
+## Part 1 — the backend, on Render
 
-### 1. Make the Space
+### 1. Push your branch first
 
-On <https://huggingface.co/new-space>:
+Render builds from GitHub, so it can only deploy code that is on GitHub. Make
+sure the backend is merged into `main` before you start, or Render will
+cheerfully build an older version and you will spend twenty minutes wondering
+why your changes are not there.
 
-- **Space name:** `nibble-api`
-- **License:** whatever you like
-- **SDK:** **Docker** → **Blank**
-- **Hardware:** CPU basic (free)
-- **Visibility:** Public
+### 2. Make the web service
 
-Create it. You get an empty repository and a page that says it is not running
-yet. That is expected — nothing has been pushed.
+On <https://dashboard.render.com/> choose **New → Web Service**, connect your
+GitHub account, and pick the Nibble repository.
 
-### 2. Give it the settings it needs
+Then change these, because the defaults are wrong for this repository:
 
-Still on the Space, go to **Settings → Variables and secrets**. Add these.
-"Secret" and "Variable" are different buttons; the difference is that a secret
-is hidden after you save it.
+- **Language / Runtime:** **Docker**. Render will probably guess Python and try
+  to install from a `requirements.txt` we do not have.
+- **Root Directory:** `backend` — this is the one everybody misses. Without it
+  Render looks for a `Dockerfile` at the top of the repository, does not find
+  one, and fails.
+- **Instance Type:** **Free**.
+- **Name:** `nibble-api`, which gives you `https://nibble-api.onrender.com`.
+  If somebody has taken that name you get a different one; write down whatever
+  you actually get, because the frontend needs it.
 
-| Name | Kind | Value |
-| --- | --- | --- |
-| `GROQ_API_KEY` | Secret | The key from your `.env` |
-| `CLERK_ISSUER` | Variable | Clerk dashboard → API keys → **Frontend API URL** |
-| `CORS_ORIGINS` | Variable | Leave this until Part 3 — you do not know it yet |
+Do **not** deploy yet. Add the settings first, or the first build starts, fails
+on a missing `CLERK_ISSUER`, and you wait through it twice.
+
+### 3. Give it the settings it needs
+
+On the same screen, open **Environment Variables** and add these:
+
+| Name | Value |
+| --- | --- |
+| `GROQ_API_KEY` | The key from your `.env` |
+| `CLERK_ISSUER` | Clerk dashboard → API keys → **Frontend API URL** |
+| `CORS_ORIGINS` | Leave this until Part 3 — you do not know it yet |
 
 `CLERK_ISSUER` looks like `https://something-12.clerk.accounts.dev`. It is not a
-secret, but the backend refuses to start without it, on purpose: see
-[`config.py`](../backend/app/config.py).
+secret — it is inside every token any browser holds — but the backend refuses to
+start without it, on purpose: see [`config.py`](../backend/app/config.py).
 
-### 3. Push the backend to it
-
-A Space is a git repository, so this is `git push` to a second remote. From the
-project folder:
-
-```bash
-git remote add space https://huggingface.co/spaces/YOUR-USERNAME/nibble-api
-git subtree push --prefix backend space main
-```
-
-`git subtree push --prefix backend` is the interesting part. The Space needs
-`backend/` to be at the *top* of its repository — its `Dockerfile` and its
-`README.md` have to be at the root — but in our repository they are one folder
-down. This pushes just that folder, with its contents lifted to the top, and
-leaves our repository exactly as it was.
-
-You will be asked for a username and password. The password is **not** your
-Hugging Face password — it is an access token from
-<https://huggingface.co/settings/tokens>, created with **Write** permission.
+**Do not set `PORT`.** Render sets it itself, and the
+[`Dockerfile`](../backend/Dockerfile) reads it.
 
 ### 4. Watch it build
 
-Back on the Space page, open the **Logs** tab. The first build takes several
-minutes, most of it installing `onnxruntime` and downloading the embedding
-model — the `Dockerfile` does that on purpose so the running app never has to.
+Now deploy, and open the **Logs** tab. The first build takes several minutes,
+most of it installing `onnxruntime` and downloading the embedding model — the
+`Dockerfile` does that at build time on purpose, so the running app never has to.
 
-When it finishes, the Space says **Running**. Its address is
+When it finishes, the service says **Live**.
 
-```
-https://YOUR-USERNAME-nibble-api.hf.space
-```
+**Check it worked:** open `https://nibble-api.onrender.com/health`. You should
+see `{"status":"ok"}`. Write that address down; the frontend needs it next.
 
-**Check it worked:** open `https://YOUR-USERNAME-nibble-api.hf.space/health`.
-You should see `{"status":"ok"}`. Write that address down; the frontend needs it
-next.
+### 5. The one check nobody has done yet
+
+Render's free tier gives this service **0.1 of a CPU**, and every timing in this
+project was measured on a laptop. Nobody has yet measured how slow embedding is
+on a fraction of a shared core.
+
+So before you rely on it: sign in, **upload one real chapter, and time it.** A
+30-page PDF should take seconds, not minutes. If it is unusable, say so — it is
+recorded as an open risk in
+[`adr/0005-render.md`](./adr/0005-render.md), and the fallback written down there
+is running the backend on a laptop behind a free `cloudflared` tunnel.
 
 ---
 
@@ -121,7 +133,7 @@ Still on the import screen, add both:
 
 | Name | Value |
 | --- | --- |
-| `VITE_API_URL` | Your Space address, no trailing slash |
+| `VITE_API_URL` | Your Render address, no trailing slash |
 | `VITE_CLERK_PUBLISHABLE_KEY` | The same one in your `frontend/.env.local` |
 
 Both start with `VITE_` because Vite only passes variables into the browser
@@ -143,7 +155,7 @@ Two things left.
 
 ### 1. Tell the backend about the frontend
 
-Space → **Settings → Variables and secrets** → set `CORS_ORIGINS`:
+Render dashboard → your service → **Environment** → set `CORS_ORIGINS`:
 
 ```
 http://localhost:5173,https://nibble-xxxx.vercel.app
@@ -152,7 +164,7 @@ http://localhost:5173,https://nibble-xxxx.vercel.app
 Both, comma-separated, **no trailing slashes**. Keep localhost in the list so
 the deployed backend still works while you develop against it.
 
-Changing a variable restarts the Space. Wait for **Running** again.
+Changing a variable redeploys the service. Wait for **Live** again.
 
 ### 2. Tell Clerk about the frontend
 
@@ -166,7 +178,7 @@ blank — which looks like a broken build and is not one.
 
 Not "it loaded". These four, in order:
 
-- [ ] `https://your-space.hf.space/health` returns `{"status":"ok"}`
+- [ ] `https://nibble-api.onrender.com/health` returns `{"status":"ok"}`
 - [ ] The Vercel site loads and shows the sign-in button
 - [ ] Signed in, you can upload a note, search it, and ask a question about it
 - [ ] **In a private window, sign in as a different account.** You should see an
@@ -178,19 +190,23 @@ Not "it loaded". These four, in order:
 
 ## Things that will happen, and what they mean
 
-**"The first question takes forever."** A free Space goes to sleep after about
-48 hours with no visitors, and waking up takes a minute. Open the site before a
-demo starts, not during it.
+**"The first question takes forever."** A free Render service goes to sleep
+after **15 minutes** with no visitors, and waking up takes about 50 seconds.
+That is much more often than it sounds — a quiet lunch break is enough. **Open
+the site a minute before a demo starts**, not during it. This is the cost
+[`adr/0005-render.md`](./adr/0005-render.md) accepted, and it is the thing about
+the free tier most likely to embarrass you.
 
-**"All my notes are gone."** A free Space has no permanent disk, so `nibble.db`
-starts empty again whenever the Space restarts or rebuilds — including every
-time you push. Re-upload. This is a known, accepted trade, written down in
-`adr/0003-hosting.md`, and the honest answer if somebody asks about it at the
-demo.
+**"All my notes are gone."** A free Render service has no permanent disk, so
+`nibble.db` starts empty again whenever the service restarts or redeploys —
+including every time you merge to `main`, and every time it wakes from sleep.
+Re-upload. This is a known, accepted trade, written down in
+[`adr/0005-render.md`](./adr/0005-render.md), and the honest answer if somebody
+asks about it at the demo.
 
 **"It says I am not signed in, on every single request."** `CLERK_ISSUER` on the
-Space does not match the Clerk application the frontend is using. They have to be
-the same Clerk application.
+Render service does not match the Clerk application the frontend is using. They
+have to be the same Clerk application.
 
 **"The page is completely blank."** Almost always the Vercel address missing from
 Clerk's Domains list. Check the browser console.
@@ -208,5 +224,5 @@ when sending the link to anybody.
 ## Deploying again, after a change
 
 - **Frontend:** merge to `main`. Vercel rebuilds on its own.
-- **Backend:** `git subtree push --prefix backend space main` again. The Space
-  rebuilds, and the database starts empty.
+- **Backend:** merge to `main`. Render rebuilds on its own, the same as Vercel,
+  because both are watching the branch. The database starts empty again.

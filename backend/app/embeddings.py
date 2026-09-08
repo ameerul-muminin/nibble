@@ -111,6 +111,10 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
     batch far faster than it works on the same texts one at a time, and an upload
     of a 40-page chapter is the difference between a pause and a wait.
 
+    That is safe to do with any number of pieces: the grouping that costs memory
+    happens inside, in fixed-size batches, so handing this a whole book does not
+    cost more memory than handing it a chapter. See the ``batch_size`` note below.
+
     The order out matches the order in — vector 0 belongs to text 0 — which is
     what lets the upload route zip these straight onto the chunks it just built.
     """
@@ -124,7 +128,20 @@ def embed_texts(texts: list[str]) -> list[list[float]]:
     # runs it, and .tolist() turns each array into ordinary Python floats —
     # which is what json.dumps needs to write into the `embedding` column,
     # because it does not know what a numpy array is.
-    vectors = [vector.tolist() for vector in get_model().embed(texts)]
+    #
+    # batch_size is the one argument here that is not obvious, and it is load
+    # bearing. `.embed()` does not run the model once per text — it groups them,
+    # and its default group is 256. Hand it a 400-piece book and it builds a
+    # tensor for 256 pieces at once, which measured at 1275 MB of memory. At 8
+    # the same book peaks at 278 MB and takes the same thirty seconds, because
+    # the work is identical either way; only how much of it is held at one
+    # moment changes. See EMBED_BATCH_SIZE in config.py for the measurements.
+    #
+    # So memory is now flat: a short note and a long book cost the same peak.
+    # Without it, the ceiling was whatever the largest file anybody uploaded.
+    vectors = [
+        vector.tolist() for vector in get_model().embed(texts, batch_size=config.EMBED_BATCH_SIZE)
+    ]
 
     # A loud check on something that would otherwise be silent. Change
     # EMBEDDING_MODEL to a model with a different width and everything here
