@@ -172,6 +172,29 @@ TOP_K = 12
 # is about what was JUST said; older turns are noise dressed as context.
 ASK_HISTORY_TURNS = 4
 
+# How short a question has to be before we treat it as a follow-up.
+#
+# A question that names its own subject does not need the ones before it, and is
+# actively hurt by them. "for the CSE 224 lab, can you name the 6 experiments"
+# is eleven words and completely self-contained; gluing two earlier questions
+# about a database chapter onto it sent the search looking for something half
+# about databases, and pieces of the wrong chapter came back.
+#
+# Six words is the line. Measured against the questions people actually asked:
+#
+#     "name them"                                    2   follow-up
+#     "the names are there"                          4   follow-up
+#     "explain the third one"                        4   follow-up
+#     "what are the experiments"                     4   follow-up
+#     "for the CSE 224 lab, ... 6 experiments"      11   stands alone
+#     "can you summarise the DB pdf"                 6   follow-up (see below)
+#
+# That last one is the known hole: a SHORT question that changes the subject
+# still picks up the previous ones. It is a smaller failure than gluing history
+# onto everything, and word count is chosen over anything cleverer because it
+# can be explained in one line and predicted without running it.
+ASK_FOLLOWUP_MAX_WORDS = 6
+
 # The most of one past turn we will read. Nothing from a browser is trusted, and
 # this is the cap that makes that true here: without it a crafted transcript
 # could push the actual notes out of the model's context, which is the one way

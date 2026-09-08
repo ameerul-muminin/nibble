@@ -142,6 +142,14 @@ def _as_messages(history: list[dict] | None) -> list[dict]:
     route already rejects those with a 422, so reaching this is a bug rather
     than a user; dropping keeps a bug from turning into a malformed request that
     fails with something unreadable from the provider.
+
+    **In practice only `user` turns ever arrive here**, because
+    ``routes._recent_turns`` discards Nibble's own — a client can claim Nibble
+    said anything, and the backend keeps no transcript to check it against. The
+    "nibble" mapping is kept anyway rather than deleted: this function's job is
+    to translate our vocabulary into the API's, and quietly losing a role would
+    make it lie about what it does if that decision is ever revisited. The
+    filtering belongs where the reason for it lives, which is the route.
     """
     if not history:
         return []

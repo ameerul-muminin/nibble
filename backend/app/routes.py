@@ -661,13 +661,35 @@ def _recent_turns(history: list[AskTurn]) -> list[dict]:
     pushes the retrieved notes out of what the model can hold — which is the one
     way to make Nibble answer from something that is not your notes, arriving
     through the front door.
+
+    **Nibble's own turns are thrown away here, and that is a security decision
+    rather than a tidying one.** The browser sends back a transcript it claims is
+    this conversation, and nothing about it can be verified: the backend stores
+    no conversations, so it has no copy to check against. A turn labelled
+    "nibble" is therefore just text a client asserted Nibble once said.
+
+    Passed on to the model as an assistant message, that text is trusted — it
+    reads as something the model itself concluded earlier. So a crafted request
+    could put a fabricated claim, or an instruction, into the model's own mouth
+    and have the answer built on it — while the reply comes back wearing a list
+    of note sources, which says the answer came from the student's notes. That
+    is precisely the guarantee this whole project exists to make.
+
+    Keeping only the `user` turns closes it completely, and costs almost
+    nothing: what a follow-up needs is the subject, and the subject is in the
+    questions. "what are the experiments" then "name them" resolves fine with no
+    assistant turn anywhere near it.
+
+    The API still *accepts* `nibble` turns, because the frontend sends the
+    transcript it is drawing and rejecting half of it would be a strange
+    contract. They are accepted and ignored.
     """
     recent = history[-config.ASK_HISTORY_TURNS :] if config.ASK_HISTORY_TURNS else []
 
     return [
         {"role": turn.role, "content": turn.content.strip()[: config.ASK_HISTORY_CHARS]}
         for turn in recent
-        if turn.content.strip()
+        if turn.role == "user" and turn.content.strip()
     ]
 
 
@@ -690,10 +712,29 @@ def _search_text(question: str, turns: list[dict]) -> str:
     the pages it already used, answers from them again, and gets more confident
     about a wrong turn every time. Searching for what the *person* asked keeps
     the conversation anchored to them.
+
+    **History is only used for a question that cannot stand on its own.** Joining
+    it onto every question was wrong, and wrong in a way that showed up the first
+    time somebody had two subjects in one Nibble. Ask about a database chapter,
+    then ask "for the CSE 224 lab, name the six experiments", and the database
+    questions were still glued to the front of the search — so the search went
+    looking for something half about databases, and pieces of the wrong chapter
+    came back and were handed to the model as if they were relevant.
+
+    A question long enough to name its own subject does not need the ones before
+    it. "name them" does; "for the CSE 224 lab, can you name the 6 experiments"
+    plainly does not, and is only hurt by it.
+
+    Word count is a blunt way to tell those apart, and it is chosen over anything
+    cleverer precisely because it can be explained in one line and predicted
+    without running it. It is not perfect: a short question that *does* change
+    the subject — "summarise the DB chapter" — still picks up the previous ones.
+    That failure is smaller than the one it replaces and is written down in
+    docs/scope.md rather than hidden here.
     """
     asked = [turn["content"] for turn in turns if turn["role"] == "user"]
 
-    if not asked:
+    if not asked or len(question.split()) > config.ASK_FOLLOWUP_MAX_WORDS:
         return question
 
     return " ".join([*asked, question])

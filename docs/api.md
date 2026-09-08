@@ -283,9 +283,28 @@ search being handed a question with the meaning removed.
 2. **To answer.** The turns are replayed to the model so "them" has something to
    point at.
 
+**Only `user` turns are ever used, for either.** A `nibble` turn is accepted and
+then ignored — see the rules below for why that is a security property and not
+tidiness.
+
+**History is only applied to a question that cannot stand on its own**, measured
+as `ASK_FOLLOWUP_MAX_WORDS` words or fewer. A question long enough to name its
+own subject is searched exactly as typed. Without this, asking about one chapter
+and then another dragged the first subject into the second search, and pieces of
+the wrong chapter came back.
+
 Rules, because this comes from the browser and nothing from the browser is
 trusted:
 
+- **A `nibble` turn is accepted and discarded.** The backend stores no
+  conversations, so it has no way to check that a turn labelled `nibble` is
+  something Nibble actually said — it is only ever text a client asserted. Sent
+  on to the model as an assistant message it would be *trusted*, so a crafted
+  request could put a fabricated claim, or an instruction, into the model's own
+  mouth and have the answer built on it — returned with a list of note sources
+  saying it came from your notes. Keeping only the questions closes that, and
+  costs nothing: a follow-up needs the subject, and the subject is in the
+  questions.
 - At most `ASK_HISTORY_TURNS` turns are read, **the most recent ones**. Anything
   longer is truncated rather than rejected.
 - `role` must be `"user"` or `"nibble"`. Anything else is a `422`.

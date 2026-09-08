@@ -1945,6 +1945,74 @@ with the real sentence.**
 only half the work. The other half is checking it can actually reach a person —
 and this project now has an example of a perfect message that could not.
 
+### A fifth and a sixth, from review — and one thing that is NOT fixed
+
+Two real defects in the follow-up work itself, both found by review rather than
+by use, and both fixed:
+
+**A client could put words in Nibble's mouth.** `history` accepted a turn
+labelled `nibble` and passed it to the model as an *assistant* message, which a
+model trusts as its own earlier conclusion. The backend stores no conversations,
+so it had no way to check the claim. A crafted request could therefore seed a
+fabricated statement — or an instruction — and have the answer built on it,
+returned with a list of note sources asserting it came from the student's notes.
+That is an attack on the one guarantee this project exists to make.
+
+Fixed by keeping only the `user` turns, for both retrieval and the model. It
+costs nothing: a follow-up needs the *subject*, and the subject is in the
+questions. `nibble` turns are still accepted, because the frontend sends the
+transcript it is drawing, and then ignored.
+
+**Old subjects contaminated new questions.** `_search_text` glued the recent
+questions onto every new one, including questions that plainly did not need
+them. Ask about a database chapter, then ask "for the CSE 224 lab, name the six
+experiments", and the search went looking for something half about databases.
+Fixed: history now applies only to a question short enough to be a follow-up
+(`ASK_FOLLOWUP_MAX_WORDS`, currently 6). The known hole is a *short* question
+that changes subject — "summarise the DB chapter" — which still picks up the
+previous ones. Smaller than what it replaces, and written down rather than
+hidden.
+
+### The thing that is NOT fixed, and cannot be by tuning
+
+Asked "for the CSE 224 lab, can you name the 6 experiments" with two documents
+uploaded, Nibble returned **five of twelve pieces from the database chapter**
+and refused. Measured against the real database, with the question searched
+alone — so this is not the history bug above:
+
+| rank | score | source |
+| --- | --- | --- |
+| 1 | 0.781 | CSE224 p.11 |
+| 2 | 0.672 | CSE224 p.1 |
+| 3 | 0.617 | CSE224 p.7 |
+| 4 | 0.602 | **ch1 DB p.31** |
+| 5 | 0.597 | CSE224 p.5 |
+| 6 | 0.596 | **ch1 DB p.29** |
+| … | … | five off-topic in the top twelve |
+
+**The off-topic pieces score 0.573–0.602. The on-topic ones score 0.573–0.585.
+The ranges overlap completely**, so no relevance threshold can separate them — a
+floor at 80% of the best score keeps only two pieces and destroys the question.
+That idea was measured and rejected rather than shipped.
+
+Worse, the seven chunks carrying an experiment heading rank **2, 5, 12, 17, 26,
+31 and 43**. `TOP_K` would have to be 43 — most of the library — to see them all.
+
+So **"name all six experiments" is not answerable by this retrieval design**,
+and no amount of tuning makes it so. Two things would actually fix it, and both
+are slices rather than knobs:
+
+- **Scope a question to one note.** The user knew which chapter they meant and
+  had no way to say so. This is the smaller, more useful fix, and it removes
+  cross-document dilution entirely.
+- **Chunk quality.** A heading and the material under it should stay together,
+  and the answer-key page should not be a piece at all. Already named under
+  Slice 4.6 as its own slice; this is the second piece of evidence for it.
+
+Recorded here rather than quietly left, because the demo question "what does
+this chapter cover" works well on ONE document and degrades as soon as there are
+two — and that is worth knowing before standing in front of anybody.
+
 ### Still owed
 - [ ] **Time an upload on Render again once this deploys.** The prediction is a
       real improvement and not a fix — 0.1 CPU is still 0.1 CPU. If it is still
