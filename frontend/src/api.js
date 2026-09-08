@@ -346,3 +346,110 @@ export function deleteQuestion(quizId, questionId) {
 export function deleteQuiz(id) {
   return request(`/quizzes/${id}`, { method: 'DELETE' })
 }
+
+// ---------------------------------------------------------------------------
+// Slice 7 — the classroom
+// ---------------------------------------------------------------------------
+//
+// Two sets of functions that never mix. The first five are the teacher's and
+// every one of them is about a room you own. The last three are the student's
+// and every one of them is about a room you joined.
+//
+// Nothing here sends "I am a teacher" or "I am a student", because there is no
+// such thing to send. The backend works it out from who owns the room and who
+// has a row in room_members — see docs/adr/0004-teacher-is-an-owner.md. The two
+// doors on the landing page pick a screen and grant nothing.
+
+/**
+ * Slice 7: open a room around one of your own quizzes.
+ *
+ * Comes back in `waiting`, with the six-character code to put on the board.
+ * Nobody can answer until you start it.
+ */
+export function createRoom(quizId) {
+  return request('/rooms', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ quiz_id: quizId }),
+  })
+}
+
+/** Slice 7: every room you run, newest first, the finished ones included. */
+export function listRooms() {
+  return request('/rooms')
+}
+
+/**
+ * Slice 7: one room you run. **This is what the teacher's screen polls**, every
+ * three seconds, for the joiner count and the state.
+ */
+export function getRoom(id) {
+  return request(`/rooms/${id}`)
+}
+
+/**
+ * Slice 7: start the room, or end it. `state` is 'open' or 'closed'.
+ *
+ * A room only ever moves forward. Asking for the state it is already in is
+ * fine and changes nothing — a double-tap on Start in front of a class is not
+ * an error — but a closed room cannot be reopened.
+ */
+export function setRoomState(id, state) {
+  return request(`/rooms/${id}/state`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ state }),
+  })
+}
+
+/**
+ * Slice 7: delete a room you run.
+ *
+ * **This takes the class's answers with it.** There is nothing to undo it with.
+ */
+export function deleteRoom(id) {
+  return request(`/rooms/${id}`, { method: 'DELETE' })
+}
+
+/**
+ * Slice 7: join a class with the code on the board.
+ *
+ * Case and spaces are forgiven by the backend, so whatever the student typed
+ * can be sent as it is. Joining twice is fine and is the same answer both
+ * times — a refresh does not make somebody a second student.
+ */
+export function joinRoom(code) {
+  return request('/rooms/join', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code }),
+  })
+}
+
+/**
+ * Slice 7: **the student's poll.** Called every three seconds while they are in
+ * the room.
+ *
+ * Everything the student screen draws comes out of `state`. `questions` is
+ * empty unless the room is open, and it **never** contains `correct` — the
+ * answer key follows ownership and this is somebody else's quiz.
+ */
+export function getStudentRoom(code) {
+  return request(`/rooms/code/${encodeURIComponent(code)}`)
+}
+
+/**
+ * Slice 7: hand the paper in. One request with every answer in it.
+ *
+ * `answers` is `[{ question_id, chosen }]`, and `chosen` is the index of the
+ * option picked. A partial paper is fine. No score comes back, deliberately:
+ * the teacher can change a mark in slice 8, and a number that later moves is
+ * worse than no number.
+ */
+export function submitAnswers(roomId, answers) {
+  return request(`/rooms/${roomId}/answers`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ answers }),
+  })
+}
