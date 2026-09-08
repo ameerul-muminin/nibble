@@ -17,6 +17,7 @@ testable without starting a server.
 """
 
 import json
+import secrets
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
@@ -1351,3 +1352,627 @@ def delete_quiz(quiz_id: int, user_id: str = Depends(current_user_id)):
         db.commit()
     finally:
         db.close()
+
+
+# ---------------------------------------------------------------------------
+# Slice 7 — The classroom
+# ---------------------------------------------------------------------------
+#
+# Eight routes, in two halves that never overlap.
+#
+# The teacher's five (POST /rooms, GET /rooms, GET /rooms/{id},
+# POST /rooms/{id}/state, DELETE /rooms/{id}) all start with _own_room: prove
+# the room is yours, then do the work. Exactly the shape of _own_quiz above.
+#
+# The student's three (POST /rooms/join, GET /rooms/code/{code},
+# POST /rooms/{id}/answers) start with membership instead — a row in
+# room_members. A student never sends anything that says "I am a student", and
+# the backend would ignore it if they did. See adr/0004-teacher-is-an-owner.md.
+#
+# The one rule in here whose failure is invisible: a student must never receive
+# `correct`. An answer key sitting in a JSON response looks completely normal on
+# screen, and hands the class the answers. _student_questions below is the only
+# place questions are built for a student, and it names its fields one at a time
+# for that reason — never dict(row), never SELECT *.
+
+
+# The alphabet a room code is drawn from.
+#
+# No O, no 0, no I, no 1. The code is read off a projector at the back of a room
+# and typed by thirty people at once, and those four characters are the ones
+# that get typed as each other. Dropping them costs nothing: 32 characters over
+# six places is still about a billion codes.
+_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+_CODE_LENGTH = 6
+
+# How many times to try again when a freshly made code is already taken. A
+# collision needs two of a billion to land on the same string, so one retry
+# would almost certainly do; five costs nothing and means the 503 below is
+# genuinely unreachable rather than merely unlikely.
+_CODE_ATTEMPTS = 5
+
+# The three states, in the only order they are allowed to happen in. Used to
+# decide whether a requested move goes forwards, backwards, or nowhere.
+_STATES = ("waiting", "open", "closed")
+
+
+class RoomRequest(BaseModel):
+    """The body of POST /rooms: which quiz this room runs."""
+
+    quiz_id: int
+
+
+class StateRequest(BaseModel):
+    """The body of POST /rooms/{id}/state: where the room is moving to."""
+
+    state: str
+
+
+class JoinRequest(BaseModel):
+    """The body of POST /rooms/join: the code off the board."""
+
+    code: str
+
+
+class SubmittedAnswer(BaseModel):
+    """One question and what the student picked for it."""
+
+    question_id: int
+    chosen: int
+
+
+class AnswersRequest(BaseModel):
+    """The body of POST /rooms/{id}/answers: the whole paper, in one request.
+
+    A list rather than one request per question. Thirty students answering ten
+    questions is thirty requests instead of three hundred, on a host with a
+    tenth of a CPU — and handing a paper in is one event, which is what the
+    student's screen says happened.
+    """
+
+    answers: list[SubmittedAnswer]
+
+
+def _new_code(db) -> str:
+    """A six-character room code that nothing is using yet.
+
+    ``secrets.choice`` rather than ``random.choice``, and the difference is real
+    even here. ``random`` is a predictable sequence from a seed — given a few
+    codes you can work out the next one — and a guessable code is a way into
+    somebody else's class. ``secrets`` is the module for values that are not
+    supposed to be guessable, and it is the same one line to use.
+
+    The loop is for collisions. ``rooms.code`` is UNIQUE, so a repeat would fail
+    at the INSERT; asking first turns that into a retry instead of an error
+    somebody has to read.
+    """
+    for _ in range(_CODE_ATTEMPTS):
+        code = "".join(secrets.choice(_CODE_ALPHABET) for _ in range(_CODE_LENGTH))
+
+        taken = db.execute("SELECT id FROM rooms WHERE code = ?", (code,)).fetchone()
+        if taken is None:
+            return code
+
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Nibble couldn’t open a room just then. Try again.",
+    )
+
+
+def _tidy_code(raw: str) -> str:
+    """The code as the database holds it, from whatever the student typed.
+
+    Uppercased and stripped, because the code is typed off a projector by
+    somebody in a hurry: ``k7m2qp``, ``  K7M2QP  `` and ``K7M2QP`` are one room.
+    Doing it here rather than in the SQL means the lookup stays an exact match
+    on an indexed column, and there is one place that decides what "the same
+    code" means.
+    """
+    return raw.strip().upper()
+
+
+def _own_room(db, room_id: int, user_id: str) -> None:
+    """Raise 404 unless this room exists and is yours to run.
+
+    Not found and not yours are the same answer, for the reason written out over
+    _own_quiz: a room that is not yours is, as far as you are concerned, not
+    there.
+
+    **This is the whole of "am I a teacher?"** There is no role to check, no
+    claim in the token, and nothing the browser sends. Being the teacher of this
+    room is one row in one table, and it is checked in the same query that finds
+    the room.
+    """
+    row = db.execute(
+        "SELECT id FROM rooms WHERE id = ? AND owner_id = ?",
+        (room_id, user_id),
+    ).fetchone()
+
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="That class isn’t here. It may already have been deleted.",
+        )
+
+
+def _room_for_teacher(db, room_id: int) -> dict:
+    """One room, in the shape docs/api.md promises the teacher's screen.
+
+    ``member_count`` and ``question_count`` are subqueries rather than two more
+    round trips, and ``title`` is joined from the quiz rather than stored on the
+    room — a room has no title of its own, and copying one would be a second
+    thing to keep in step the day somebody renames the quiz.
+    """
+    row = db.execute(
+        """
+        SELECT r.id, r.quiz_id, r.code, r.state, r.created_at, q.title,
+               (SELECT COUNT(*) FROM room_members m WHERE m.room_id = r.id) AS member_count,
+               (SELECT COUNT(*) FROM questions x WHERE x.quiz_id = r.quiz_id) AS question_count
+        FROM rooms r
+        JOIN quizzes q ON q.id = r.quiz_id
+        WHERE r.id = ?
+        """,
+        (room_id,),
+    ).fetchone()
+
+    return {
+        "id": row["id"],
+        "quiz_id": row["quiz_id"],
+        "title": row["title"],
+        "code": row["code"],
+        "state": row["state"],
+        "member_count": row["member_count"],
+        "question_count": row["question_count"],
+        "created_at": row["created_at"],
+    }
+
+
+def _student_questions(db, quiz_id: int) -> list[dict]:
+    """The questions as a student is allowed to see them.
+
+    **The only place in this file that builds a question for somebody who does
+    not own it**, and the reason it exists rather than reusing _questions_of.
+
+    Two fields are missing on purpose:
+
+    - ``correct`` is the answer key. Sending it hands the class the answers, and
+      nothing on screen would look wrong while it happened.
+    - ``page`` is a page of the teacher's note, which the student does not have
+      and cannot check. It says something about somebody else's chapter and buys
+      the student nothing.
+
+    Every field is named one at a time. Never ``dict(row)``, never ``SELECT *``:
+    both of those grow a new field the day a column is added, and this is the
+    one response where growing a field quietly is a real failure.
+    """
+    rows = db.execute(
+        "SELECT id, position, prompt, options FROM questions "
+        "WHERE quiz_id = ? ORDER BY position, id",
+        (quiz_id,),
+    ).fetchall()
+
+    return [
+        {
+            "id": row["id"],
+            "position": row["position"],
+            "prompt": row["prompt"],
+            "options": json.loads(row["options"]),
+        }
+        for row in rows
+    ]
+
+
+def _joined_room(db, code: str, user_id: str):
+    """The room behind this code, if this person has joined it. 404 otherwise.
+
+    One 404 for three different situations — no such code, a code that exists
+    but you never joined, and a room somebody deleted while you were in it — for
+    the same reason ownership failures are 404s: the alternative confirms that
+    somebody else's class exists.
+    """
+    row = db.execute(
+        """
+        SELECT r.id, r.quiz_id, r.state, r.code, q.title
+        FROM rooms r
+        JOIN quizzes q ON q.id = r.quiz_id
+        JOIN room_members m ON m.room_id = r.id AND m.user_id = ?
+        WHERE r.code = ?
+        """,
+        (user_id, code),
+    ).fetchone()
+
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="That class isn’t here. Check the code with your teacher.",
+        )
+
+    return row
+
+
+@router.post("/rooms", status_code=status.HTTP_201_CREATED)
+def create_room(request: RoomRequest, user_id: str = Depends(current_user_id)):
+    """Open a room around one of your own quizzes. It starts in `waiting`.
+
+    Contract, from docs/api.md: the room with its code, 201.
+
+    Ownership is checked against the quiz, because there is no room yet — the
+    same move create_quiz makes against the document. Without it anybody could
+    run somebody else's quiz as a class and read its questions back out through
+    the student endpoint.
+    """
+    created_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S")
+
+    db = get_db()
+    try:
+        quiz = db.execute(
+            "SELECT id FROM quizzes WHERE id = ? AND user_id = ?",
+            (request.quiz_id, user_id),
+        ).fetchone()
+
+        if quiz is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="That quiz isn’t here. It may already have been deleted.",
+            )
+
+        cursor = db.execute(
+            "INSERT INTO rooms (owner_id, quiz_id, code, state, created_at) "
+            "VALUES (?, ?, ?, 'waiting', ?)",
+            (user_id, request.quiz_id, _new_code(db), created_at),
+        )
+        db.commit()
+
+        return _room_for_teacher(db, cursor.lastrowid)
+    finally:
+        db.close()
+
+
+@router.get("/rooms")
+def list_rooms(user_id: str = Depends(current_user_id)):
+    """Every room you run, newest first — the closed ones included.
+
+    A finished class is still yours to look back at, and slice 8's marking
+    screen reads exactly those. Hiding them here would mean building a second
+    way to find them.
+    """
+    db = get_db()
+    try:
+        rows = db.execute(
+            """
+            SELECT r.id, r.quiz_id, r.code, r.state, r.created_at, q.title,
+                   (SELECT COUNT(*) FROM room_members m WHERE m.room_id = r.id) AS member_count,
+                   (SELECT COUNT(*) FROM questions x WHERE x.quiz_id = r.quiz_id) AS question_count
+            FROM rooms r
+            JOIN quizzes q ON q.id = r.quiz_id
+            WHERE r.owner_id = ?
+            ORDER BY r.id DESC
+            """,
+            (user_id,),
+        ).fetchall()
+    finally:
+        db.close()
+
+    return [
+        {
+            "id": row["id"],
+            "quiz_id": row["quiz_id"],
+            "title": row["title"],
+            "code": row["code"],
+            "state": row["state"],
+            "member_count": row["member_count"],
+            "question_count": row["question_count"],
+            "created_at": row["created_at"],
+        }
+        for row in rows
+    ]
+
+
+@router.get("/rooms/{room_id}")
+def get_room(room_id: int, user_id: str = Depends(current_user_id)):
+    """One room you own. **This is what the teacher's screen polls.**
+
+    Every three seconds, while the code is on the projector, for the joiner
+    count. It touches one row and two counts, which is why polling is affordable
+    here at all — see the note in docs/scope.md about thirty students on a tenth
+    of a CPU.
+    """
+    db = get_db()
+    try:
+        _own_room(db, room_id, user_id)
+        return _room_for_teacher(db, room_id)
+    finally:
+        db.close()
+
+
+@router.post("/rooms/{room_id}/state")
+def set_room_state(
+    room_id: int,
+    request: StateRequest,
+    user_id: str = Depends(current_user_id),
+):
+    """Start the room, or end it. A room only ever moves forward.
+
+    Three answers to three kinds of request, and the middle one is the
+    interesting one:
+
+    - **Forwards** — waiting to open, open to closed, or waiting straight to
+      closed if a class is called off. Done.
+    - **Nowhere** — the state it is already in. A 200 that changes nothing,
+      because a double-tap on Start in front of a class is not an error and must
+      not put a red sentence on the projector.
+    - **Backwards** — a 400. Reopening a closed room would let a second paper
+      land against a class that is over, and the answers already stored are the
+      reason that matters.
+    """
+    wanted = request.state
+
+    if wanted not in _STATES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A class can only be waiting, open or closed.",
+        )
+
+    db = get_db()
+    try:
+        _own_room(db, room_id, user_id)
+
+        current = db.execute("SELECT state FROM rooms WHERE id = ?", (room_id,)).fetchone()["state"]
+
+        # The states are held in order, so "forwards" is just a comparison of
+        # where each one sits in the tuple. Reading it out of the order they are
+        # written in beats a table of which move is allowed from where — there is
+        # one line to check rather than nine.
+        if _STATES.index(wanted) < _STATES.index(current):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "A class that has ended can’t be reopened. Open a new one for the same quiz."
+                    if current == "closed"
+                    else "A class that has started can’t go back to waiting."
+                ),
+            )
+
+        if wanted != current:
+            db.execute("UPDATE rooms SET state = ? WHERE id = ?", (wanted, room_id))
+            db.commit()
+
+        return _room_for_teacher(db, room_id)
+    finally:
+        db.close()
+
+
+@router.delete("/rooms/{room_id}", status_code=204)
+def delete_room(room_id: int, user_id: str = Depends(current_user_id)):
+    """Delete a room you run.
+
+    **This takes the class's answers with it**, through ON DELETE CASCADE —
+    the members and every answer they gave. There is nothing to undo it with,
+    and slice 8's marking screen reads exactly that data.
+    """
+    db = get_db()
+    try:
+        _own_room(db, room_id, user_id)
+        db.execute("DELETE FROM rooms WHERE id = ? AND owner_id = ?", (room_id, user_id))
+        db.commit()
+    finally:
+        db.close()
+
+
+@router.post("/rooms/join")
+def join_room(request: JoinRequest, user_id: str = Depends(current_user_id)):
+    """Join a class with the code on the board.
+
+    **Joining twice is fine, and gives the same answer both times.** A student
+    who refreshes, or comes back after their phone locked, is not a second
+    student — and the teacher is watching that count while deciding whether to
+    start. INSERT OR IGNORE plus the UNIQUE (room_id, user_id) in db.py is what
+    makes that true no matter how many times this is called.
+
+    A room that is already open still accepts joins, so somebody who arrives
+    late can still sit the quiz.
+    """
+    code = _tidy_code(request.code)
+
+    if not code:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Type the class code your teacher put on the board.",
+        )
+
+    joined_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S")
+
+    db = get_db()
+    try:
+        room = db.execute(
+            "SELECT r.id, r.code, r.state, q.title FROM rooms r "
+            "JOIN quizzes q ON q.id = r.quiz_id WHERE r.code = ?",
+            (code,),
+        ).fetchone()
+
+        if room is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No class with that code. Check it with your teacher and try again.",
+            )
+
+        if room["state"] == "closed":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="That class has already ended.",
+            )
+
+        db.execute(
+            "INSERT OR IGNORE INTO room_members (room_id, user_id, joined_at) VALUES (?, ?, ?)",
+            (room["id"], user_id, joined_at),
+        )
+        db.commit()
+
+        return {
+            "room_id": room["id"],
+            "code": room["code"],
+            "title": room["title"],
+            "state": room["state"],
+        }
+    finally:
+        db.close()
+
+
+@router.get("/rooms/code/{code}")
+def get_room_for_student(code: str, user_id: str = Depends(current_user_id)):
+    """**The student's poll.** Every three seconds, while they are in the room.
+
+    Everything the student screen draws comes from ``state``, which is the whole
+    point of a room being a three-state machine rather than a handful of
+    booleans that can disagree with each other.
+
+    ``questions`` is empty unless the room is open: not while waiting, so the
+    paper is not handed out before the teacher starts, and not once closed,
+    because there is nothing left to do with it.
+
+    ``submitted`` is what stops a refresh offering the quiz a second time.
+    """
+    db = get_db()
+    try:
+        room = _joined_room(db, _tidy_code(code), user_id)
+
+        answered = db.execute(
+            "SELECT id FROM answers WHERE room_id = ? AND user_id = ? LIMIT 1",
+            (room["id"], user_id),
+        ).fetchone()
+
+        questions = _student_questions(db, room["quiz_id"]) if room["state"] == "open" else []
+    finally:
+        db.close()
+
+    return {
+        "room_id": room["id"],
+        "title": room["title"],
+        "state": room["state"],
+        "submitted": answered is not None,
+        "questions": questions,
+    }
+
+
+@router.post("/rooms/{room_id}/answers")
+def submit_answers(
+    room_id: int,
+    request: AnswersRequest,
+    user_id: str = Depends(current_user_id),
+):
+    """Hand the paper in. One request, every answer in it, once.
+
+    **No score comes back.** The mark is worked out and stored here, but the
+    teacher can change it in slice 8, and a number that later moves is worse
+    than no number. The student sees "Submitted". Practising alone is the
+    opposite case and shows the score straight away, because there nobody is
+    going to overrule it.
+
+    **A partial paper is accepted.** Somebody who ran out of time and answered
+    three of five sends three; the missing ones are simply absent, and slice 8
+    reads them as unanswered rather than wrong.
+
+    Everything is checked before anything is written, so a paper that is refused
+    leaves nothing behind — the same rule as a quiz that fails to generate.
+    """
+    db = get_db()
+    try:
+        membership = db.execute(
+            "SELECT r.id, r.quiz_id, r.state FROM rooms r "
+            "JOIN room_members m ON m.room_id = r.id AND m.user_id = ? "
+            "WHERE r.id = ?",
+            (user_id, room_id),
+        ).fetchone()
+
+        # Not a member and no such room are the same 404, the same way they are
+        # everywhere else here. A student who was never in this class should not
+        # be able to learn it exists by being told they are not in it.
+        if membership is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="That class isn’t here. Check the code with your teacher.",
+            )
+
+        if membership["state"] != "open":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "That class has ended, so answers are closed."
+                    if membership["state"] == "closed"
+                    else "Your teacher hasn’t started the quiz yet."
+                ),
+            )
+
+        already = db.execute(
+            "SELECT id FROM answers WHERE room_id = ? AND user_id = ? LIMIT 1",
+            (room_id, user_id),
+        ).fetchone()
+
+        if already is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You’ve already handed this one in.",
+            )
+
+        if not request.answers:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Pick an answer for at least one question before handing it in.",
+            )
+
+        # The answer key, read once, for the questions of THIS room's quiz only.
+        # Reading it by quiz_id rather than by the ids that were sent is what
+        # makes the check below mean something: a question id from somebody
+        # else's quiz simply is not in here.
+        key = {
+            row["id"]: row["correct"]
+            for row in db.execute(
+                "SELECT id, correct FROM questions WHERE quiz_id = ?",
+                (membership["quiz_id"],),
+            ).fetchall()
+        }
+
+        seen = set()
+        rows = []
+        answered_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S")
+
+        for answer in request.answers:
+            if answer.question_id not in key:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="That answer isn’t for a question in this quiz. Reload and try again.",
+                )
+
+            if not 0 <= answer.chosen <= 3:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="That answer isn’t one of the options. Reload and try again.",
+                )
+
+            # The same question twice in one paper. The UNIQUE in db.py would
+            # catch it as an IntegrityError partway through the insert, which is
+            # a 500 and half a paper stored; catching it here is a sentence and
+            # nothing written.
+            if answer.question_id in seen:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="That paper answers the same question twice. Reload and try again.",
+                )
+
+            seen.add(answer.question_id)
+
+            # The mark, written now rather than worked out when somebody looks.
+            # See the comment over answers.mark in db.py for why it is stored.
+            mark = 1 if answer.chosen == key[answer.question_id] else 0
+            rows.append((room_id, user_id, answer.question_id, answer.chosen, mark, answered_at))
+
+        db.executemany(
+            "INSERT INTO answers (room_id, user_id, question_id, chosen, mark, answered_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            rows,
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    return {"submitted": True, "answered": len(rows)}

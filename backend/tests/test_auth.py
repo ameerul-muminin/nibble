@@ -91,6 +91,18 @@ PROTECTED = [
     ("PATCH", "/quizzes/1/questions/1", {"correct": 1}),
     ("DELETE", "/quizzes/1/questions/1", None),
     ("DELETE", "/quizzes/1", None),
+    # Slice 7. The teacher's five are as private as the quiz they run. The
+    # student's three are here for a different reason: without a verified token
+    # there is no `sub`, so there is nobody to be a member of a room — anonymous
+    # answering would be a paper with no name on it.
+    ("POST", "/rooms", {"quiz_id": 1}),
+    ("GET", "/rooms", None),
+    ("GET", "/rooms/1", None),
+    ("POST", "/rooms/1/state", {"state": "open"}),
+    ("DELETE", "/rooms/1", None),
+    ("POST", "/rooms/join", {"code": "K7M2QP"}),
+    ("GET", "/rooms/code/K7M2QP", None),
+    ("POST", "/rooms/1/answers", {"answers": [{"question_id": 1, "chosen": 0}]}),
 ]
 
 
