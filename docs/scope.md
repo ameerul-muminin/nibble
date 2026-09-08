@@ -2752,6 +2752,48 @@ happened. That proves the handling is right, and for two of them that the
 rollback really does undo a write that had already run. It does not prove the
 window is as narrow as the comments claim. Nothing in a test suite can.
 
+### A sixth was raised and declined, 2026-09-09
+
+Review then found the same pattern in `GET /rooms/code/{code}`: the student's
+poll reads the state, and if the teacher presses End in the moment after that
+read, the reply says `open` and carries the questions for a class that has just
+finished.
+
+The reading is correct. **It is not a bug, and the difference is that this route
+writes nothing.**
+
+Every one of the five above ends with something stored — a paper, a member row,
+a state — that outlives the moment it was decided in, and is wrong from then on.
+This one ends with a sentence about how things were when you asked. A read of a
+value that can change is stale the instant it returns, and no amount of
+re-reading fixes that: move the check to the last line before the response and
+End can still land while the JSON is being serialised, or while the bytes are on
+the wire, or while the student is looking at the screen. The window cannot be
+closed, only moved.
+
+What makes that acceptable rather than merely unavoidable:
+
+- **The reply is internally consistent.** `questions` and `state` are decided
+  from the same read, so the response never contradicts itself — it is one
+  coherent snapshot of a moment that has passed, not a mix of two.
+- **The screen corrects itself in three seconds**, because this route exists to
+  be called every three seconds. The finding's own premise is the mitigation.
+- **Nothing the student does with a stale paper survives.** `POST
+  /rooms/{id}/answers` checks the state when it runs and checks it again after
+  the insert, so a paper begun against stale questions is refused with a
+  sentence. **The rule lives on the write, which is the only place it can be
+  enforced**, and that is exactly where the five fixes above put it.
+- **Nothing is exposed that was not already theirs.** A student polling an open
+  room is entitled to those questions; receiving them a millisecond after End
+  rather than a millisecond before is not a disclosure. That is the opposite of
+  the reopened-room bug, where a class that had **finished** started handing
+  questions out again, with no time limit on it.
+
+Recorded rather than quietly skipped, so the next reviewer who spots it can see
+it was looked at and why the answer is no. Chasing it would mean adding a check
+that cannot deliver what it appears to promise, which is worse than the gap: it
+would suggest this reply is authoritative when it can never be.
+
 ### Checked by running it, and what that does and does not prove
 
 - **318 backend tests pass**, 48 of them new. The four rules from the plan each
