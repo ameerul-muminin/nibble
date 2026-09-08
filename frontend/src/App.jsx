@@ -389,7 +389,13 @@ function Nibble() {
     setAskError(null)
 
     try {
-      const body = await ask(trimmed)
+      // `turns` here is the conversation as it was when this handler started —
+      // everything already said, and not the question just typed. That is
+      // exactly the history the backend wants, and it is the one place where
+      // the stale-closure behaviour the comments above warn about is the
+      // correct behaviour rather than a bug: the new question travels in its
+      // own field, so including it here would send it twice.
+      const body = await ask(trimmed, turns)
 
       // A refusal arrives here, not in the catch. "That isn't in your notes
       // yet." is Nibble working correctly, and it goes in a bubble like any
@@ -844,6 +850,26 @@ function Nibble() {
             {busy ? 'Reading…' : 'Add a note'}
           </button>
         </div>
+
+        {/*
+          What is happening while an upload is in flight.
+
+          This is here because "Reading…" on a button is not enough feedback for
+          how long this actually takes. Nibble turns every piece of a chapter
+          into numbers before it stores it, on the free host's very small share
+          of a CPU, and a chapter can take a minute or more. With nothing on
+          screen, people conclude it has hung and reload — which loses the
+          upload that was very nearly finished.
+
+          Two sentences: what it is doing, and roughly how long. Saying "this
+          takes a moment" without a number is the thing that reads as a hang.
+        */}
+        {busy && (
+          <p role="status" style={{ color: 'var(--text-muted)' }}>
+            Reading your note and getting it ready to search. A long chapter can take
+            a minute or two — you can leave this open.
+          </p>
+        )}
 
         {/* One plain sentence when something went wrong. Never a raw error. */}
         {notice && (

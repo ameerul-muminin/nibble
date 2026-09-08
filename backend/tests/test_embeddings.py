@@ -109,7 +109,11 @@ def test_two_threads_asking_at_once_still_build_only_one_model(monkeypatch):
     builds = []
 
     class SlowFakeModel:
-        def __init__(self, model_name=None):
+        # `threads` is accepted because get_model passes it — see the measured
+        # reason it is pinned to 1 in embeddings.py. The fake has to take the
+        # same arguments the real constructor does, or this stops testing the
+        # locking and starts failing on a signature.
+        def __init__(self, model_name=None, threads=None):
             time.sleep(0.05)
             builds.append(model_name)
 

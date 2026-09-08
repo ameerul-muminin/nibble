@@ -64,6 +64,7 @@ already closed.
 | 3   | Search, no AI yet     | Slice 3 — Search          | done, merged            |
 | 4   | Nibble answers        | Slice 4 — Nibble answers  | done, merged            |
 | 4.5 | On the internet       | — (unplanned)             | done, merged, deployed  |
+| 4.6 | What real use broke   | — (unplanned)             | built, not yet merged   |
 | 5   | Make it Nibble        | Slice 5 — Make it Nibble  | paused — now last       |
 | 6   | Quiz yourself         | Slice 6 — Quiz yourself   | next                    |
 | 7   | The classroom         | Slice 7 — The classroom   | open                    |
@@ -108,9 +109,16 @@ Checked against the deployed backend rather than assumed: `/health` answers 200
 with no token, and `/documents` and `/ask` answer 401 without one — in our own
 sentences, not the JWT library's, including for a forged token.
 
-**Two things about the deploy are still owed**, and they are listed under Slice
-4.5 rather than here: nobody has signed in as two accounts to confirm they see
-different notes, and nobody has timed a real upload on Render's 0.1 CPU.
+**Both things the deploy owed have now been done, and one of them stopped the
+plan.** Two accounts do see different notes — confirmed by hand. And a real
+upload on Render's 0.1 CPU was timed: **three to four minutes** for an 11-page
+PDF. The same session found that follow-up questions were answered wrongly.
+
+**So slice 6 did not start. Slice 4.6 happened instead**, and it is written up
+below Slice 4.5. The short version: the answers were never a model problem —
+retrieval was starving it three different ways — and the slowness was never a
+bug, it is what 0.1 CPU costs. Both are now fixed or mitigated, and **none of it
+is verified in a browser yet**, which is the same gap that let it ship.
 
 ### The plan changed on 2026-09-08, and slice 5 moved to last
 
@@ -1696,9 +1704,227 @@ laptop.
       slow embedding is on a fraction of a shared core. This is the open risk in
       [`adr/0005-render.md`](./adr/0005-render.md), and the fallback if it is
       unusable is a laptop behind a free `cloudflared` tunnel.
-- [ ] **Two accounts, two sets of notes, one deployed backend.** The whole point
-      of this slice. Sign in as one person, upload something, sign in as another
-      in a private window, and confirm the second sees nothing of the first.
+- [x] **Two accounts, two sets of notes, one deployed backend.** The whole point
+      of this slice. Confirmed by hand on 2026-09-08: signed in as a second
+      account and it sees nothing of the first.
+- [x] **Somebody has timed a real upload on Render's 0.1 CPU.** An 11-page text
+      PDF took **three to four minutes**. That is the answer, and it was bad
+      enough to stop the plan — see the section below.
+
+## Slice 4.6: What the first real use broke, 2026-09-08
+
+Slice 4.5 put Nibble on the internet. The first person to use it in earnest
+uploaded an 11-page lab PDF and asked it three questions, and **both halves of
+the product failed** — the upload took minutes, and the answers were wrong.
+
+Neither failure was where it looked like it was. Writing that down properly is
+the point of this section, because the wrong diagnosis was available and
+obvious in both cases.
+
+### The answers were wrong, and the model was not at fault
+
+The transcript that started this:
+
+> **What are the experiments** — "The lab includes six experiments, numbered
+> Experiment 1 through Experiment 6 (p. 1)."
+>
+> **name them** — "Twisted ring counter (p. 6)."
+
+That reads exactly like a model making things up, which is the one failure this
+whole project is built to prevent. It was not. It was **retrieval starving the
+model**, three separate ways, all of them measured against the real PDF rather
+than guessed at:
+
+- **`/ask` had no memory.** "name them" was sent to the backend on its own,
+  embedded on its own, and searched for on its own. Two words with no subject
+  match nothing in particular, so search returned near-random pieces — including
+  the Johnson counter page — and the model answered from those. It did exactly
+  as it was told. The frontend draws a conversation, which invites follow-ups
+  the API could not answer, and nobody noticed because slice 4 was merged
+  without anyone opening it in a browser. That unverified merge is recorded
+  under Slice 4; this is what it cost.
+- **`TOP_K` was 5, and 5 is structurally too few.** Reaching all six experiment
+  headings in that PDF needed 11 of its 12 pieces. Five could never do it. The
+  number was chosen before anybody had asked a real question of a real document.
+- **The answer key is a retrieval magnet.** Page 11 is a wall of
+  `1. C 2. B 3. B…`, and it ranked **first for every single query tried**,
+  scoring 0.725 on "name the six experiments". It is text with no meaning that
+  matches everything weakly, and at `TOP_K = 5` it was eating a fifth of the
+  model's entire view of the document.
+
+**A hypothesis that was wrong, recorded because it was plausible.** The `bge`
+models are documented as wanting an instruction prefix on the query
+("Represent this sentence for searching relevant passages:"), and `embeddings.py`
+does not add one. `fastembed` has `query_embed()` for exactly this. Tested
+against the real chunks, it produced **scores identical to three decimal
+places** — no reranking whatsoever. It is not the problem here and the change
+was not made.
+
+Measured before and after, on "name them" following "What are the experiments":
+
+| | experiment headings reaching the model |
+| --- | --- |
+| before | 2 of 6 |
+| history added, `TOP_K` still 5 | 3 of 6 |
+| history added, `TOP_K` 12 | **6 of 6** |
+
+Both changes were needed and neither was sufficient alone. That table is the
+argument for the two of them together.
+
+### The upload was slow because 0.1 CPU is 0.1 CPU
+
+No bug here at all, which took longer to accept than to find. Embedding 30
+pieces — roughly what 11 pages produces — measured on a 16-core laptop:
+
+| threads | wall time | CPU burned |
+| --- | --- | --- |
+| 1 | 2.41s | ~2.4 CPU-seconds |
+| 2 | 2.50s | ~5.0 CPU-seconds |
+| 4 | 2.57s | ~10.3 CPU-seconds |
+| 16 (the default) | 2.47s | ~39.5 CPU-seconds |
+
+**Read the first column: the extra threads buy nothing.** The model is small
+enough that one core saturates it, and the other fifteen threads spend their
+time synchronising rather than working.
+
+**Now read the second column, because that is the one Render bills.** The free
+tier gives 0.1 CPU — ten milliseconds in every hundred. `onnxruntime` counts the
+*host's* cores, not our share of them, and starts a thread for each. Sixteen
+threads then queue for one tenth of one core, and each stalls to the next
+scheduling window. So the fix is to stop asking for parallelism we were never
+getting: `threads=1`, which costs nothing on a laptop and is the cheapest thing
+available on the deployed host.
+
+### Decided, 2026-09-08 — cheap wins only, and the embedding model does not change
+
+The choice was between cheap mitigations and moving embedding into a background
+job so the upload returns instantly. **Cheap wins only**, because a background
+job means a new concept to explain at the demo — a note that exists but is not
+yet searchable — and the demo is the thing being protected.
+
+Related, and asked at the same time: **could a different model make it faster?**
+Two different models are involved and only one of them is slow, which is the
+distinction that matters. Groq answers questions in a couple of seconds over the
+network; the slow one is the *embedding* model running locally. Measured, at one
+thread, on the same 30 pieces:
+
+| model | time | MTEB retrieval |
+| --- | --- | --- |
+| `BAAI/bge-small-en-v1.5` (current) | 2.56s | ~51.7 |
+| `snowflake/snowflake-arctic-embed-xs` | 1.24s | ~50.2 |
+| `sentence-transformers/all-MiniLM-L6-v2` | 0.90s | ~41.9 |
+
+`arctic-embed-xs` is **twice as fast for about a point and a half of retrieval
+quality**, and is genuinely worth considering later. It was **not** taken now,
+for two reasons: the thing that just broke was retrieval quality, so trading any
+of it away while the wound is open is the wrong direction; and changing
+`EMBEDDING_MODEL` invalidates every stored embedding, so everyone has to delete
+and re-upload their notes. That is a decision with a migration attached, and it
+deserves its own ADR rather than being smuggled in as a speed fix.
+
+Meta's Muse Spark 1.3 came up as a candidate. It is a large multimodal
+*reasoning* model, it is not open-weight (Meta committed to releasing 1.2's
+weights; 1.3 is undecided), and it is a paid API. It could only ever replace the
+Groq chat model, which is not the slow part — so it would not make an upload one
+second faster, and it would break the "everything is free" rule to do it.
+
+### What was built
+
+- [x] `docs/api.md` — the `POST /ask` contract entry, written first: `history`
+      is optional, roles are `user` or `nibble`, and `sources` is now one entry
+      per page.
+- [x] `config.py` — `TOP_K` 5 → 12, with the measurement and the tension written
+      into the comment. `ASK_HISTORY_TURNS` and `ASK_HISTORY_CHARS` added.
+- [x] `embeddings.py` — `threads=1`, with the table above in the comment.
+- [x] `Dockerfile` — `OMP_NUM_THREADS=1` and friends, covering the libraries
+      that read the environment rather than being told by onnxruntime.
+- [x] `main.py` — the embedding model starts loading at startup, in a daemon
+      thread rather than inline. Inline would hold the port closed, and Render
+      decides a deploy failed by watching for that port.
+- [x] `routes.py` — `/ask` accepts `history`, searches on the recent questions
+      plus the new one, and deduplicates `sources` by page.
+- [x] `llm.py` — replays the conversation to the model so "them" has something
+      to point at.
+- [x] `App.jsx` — sends the transcript; says what is happening during an upload
+      and roughly how long it takes.
+- [x] `llm.py` — rule 2 split into rules 2 and 3, so five of six answers is an
+      answer with the gap named rather than a flat refusal. Found by opening it
+      in a browser; see the section below.
+- [x] 165 backend tests pass, including 18 new ones covering follow-ups,
+      deduplication, and how the conversation reaches the model. Frontend lints
+      and builds clean.
+
+### Two decisions inside this worth knowing about
+
+**Only the `user` turns are searched for, never Nibble's own answers.** Feeding
+a model's replies back into retrieval makes every question drift toward what it
+has already said: it finds the pages it used last time, answers from them again,
+and gets more confident about a wrong turn with each question. Searching for
+what the *person* asked keeps the conversation anchored to them.
+
+**Sources are deduplicated after the model has seen everything.** The model
+still reads all 12 pieces; only the list on screen collapses to one row per
+page. That keeps the claim `docs/api.md` makes about `sources` honest — it is
+what Nibble read — while fixing the thing that made it look broken, which was
+`p. 1` appearing twice with different excerpts.
+
+### Opened in a browser, 2026-09-09 — and it found a third bug
+
+The check slice 4 never did. It worked, and it immediately turned up something
+neither the tests nor the retrieval measurements could have caught.
+
+**The DB chapter went perfectly.** Asked to summarise a 31-page database
+chapter, Nibble produced six accurate sentences, each carrying the page it came
+from, drawn from twelve distinct pages. That is the product working as intended,
+and it is the first time anybody has seen it do that.
+
+**The lab PDF produced a refusal that contradicted itself:**
+
+> **can you name the 6 experiments** — "That isn't in your notes yet. Your notes
+> cover Experiments 1, 3, 4, 5, and 6."
+
+Retrieval was fine — it had five of the six headings. **The prompt was wrong.**
+Rule 2 ended with "never soften this into a partial answer", so the model had
+only two options: answer everything, or refuse. Holding five of six, it refused,
+then listed five of six in the very next sentence. It obeyed the prompt exactly
+and produced something worse than either option.
+
+The missing distinction is between **nothing** and **not everything**:
+
+- *Nothing* is a refusal. Unchanged, and it must stay unchanged — it is still
+  the most important behaviour in this project.
+- *Not everything* is an answer plus an honest note about the gap. Getting five
+  of six with the sixth named as missing is what a tutor does, and it is what
+  somebody revising actually needs.
+
+So rule 2 was split into rules 2 and 3. Checked by hand against real Groq calls,
+in both directions, because the note at the top of `test_llm.py` is right that
+this cannot be asserted in a test:
+
+| case | notes contain | result |
+| --- | --- | --- |
+| "can you name the 6 experiments" | five of six headings | **answers all five, cites each page, says "Your notes don't have Experiment 2."** |
+| "the names are there" | five of six headings | **answers, does not refuse** |
+| "what is the Krebs cycle" | nothing related | **refuses** |
+| "explain photosynthesis in plants" | nothing related | **refuses** |
+
+The refusal is intact and the partial answer is fixed. That table is the
+evidence, and it is the check issue #15 asks for.
+
+### Still owed
+- [ ] **Time an upload on Render again once this deploys.** The prediction is a
+      real improvement and not a fix — 0.1 CPU is still 0.1 CPU. If it is still
+      minutes, background embedding comes back on the table.
+- [ ] **The answer-key magnet is worked around, not solved.** Page 11 still
+      ranks first for everything; `TOP_K = 12` just means it no longer crowds
+      out the real content. A proper fix is chunk quality, and it is a slice of
+      its own, not a tuning knob.
+- [ ] **`main.py` uses `@app.on_event("startup")`, which FastAPI deprecates**
+      in favour of `lifespan`. It prints two warnings in the test run. It was
+      kept deliberately: `lifespan` needs `@asynccontextmanager` and an `async
+      def`, and CLAUDE.md's "no async/await to explain" is worth more here than
+      silencing a warning. Worth revisiting if the warning ever becomes an
+      error.
 
 ## Slice 5: Make it Nibble
 

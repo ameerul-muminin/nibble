@@ -173,20 +173,42 @@ instances are not domain-locked, so the Vercel address just works. This was
 checked on 2026-09-08: the deployed site loaded and signed in with nothing added
 to Clerk at all.
 
-You can tell which you are on:
+**You can tell which you are on by looking at the key you already have.** Open
+`frontend/.env.local` — or the same variable in Vercel — and read the start of
+`VITE_CLERK_PUBLISHABLE_KEY`:
 
-```bash
-clerk doctor
-```
+| It starts with | You are on | What to do here |
+| --- | --- | --- |
+| `pk_test_` | a development instance | **Nothing. Skip to "Check it actually works".** |
+| `pk_live_` | a production instance | Read the rest of this step |
 
-If it says *"production not configured"*, skip this step entirely.
+No tool to install, and nothing to run. The prefix is the whole check, and it is
+the same key that is already in front of you.
 
-**On a production instance**, add the Vercel address at Clerk dashboard → your
-application → **Domains**. Without it Clerk refuses to load and the page stays
-blank — which looks like a broken build and is not one.
+**On a production instance, you cannot use the `.vercel.app` address at all.**
+This is the part worth reading slowly, because it is the opposite of what the
+development instance taught you. A production Clerk instance is domain-locked to
+a domain *you* own, and `nibble-xxxx.vercel.app` is Vercel's domain, not yours.
+There is no field in Clerk you can paste it into that will work.
 
-Production keys also need a domain you control, and `.vercel.app` is not one — so
-this step only starts mattering the day Nibble gets a real domain.
+So on a production instance the order is:
+
+1. **Buy a domain**, or use one you already own.
+2. Add it to Vercel: project → **Settings** → **Domains**, and follow the DNS
+   records it gives you.
+3. Add that same domain to Clerk: dashboard → your application → **Domains**,
+   and set the DNS records Clerk asks for.
+4. Update `CORS_ORIGINS` on Render to the new address, and
+   `VITE_API_URL` / `VITE_CLERK_PUBLISHABLE_KEY` on Vercel if they changed.
+
+Until all of that is done, Clerk refuses to load and the page stays blank —
+which looks like a broken build and is not one.
+
+**Nibble does not have a real domain, so it runs on a development instance, and
+that is a deliberate choice rather than an unfinished one.** Development
+instances are not domain-locked, which is exactly why the free `.vercel.app`
+address works. Everything above starts mattering the day somebody buys a domain,
+and not before.
 
 ---
 

@@ -220,6 +220,20 @@ export function search(query) {
 /**
  * Slice 4: ask a question and get an answer built from your own notes.
  *
+ * `history` is the conversation so far, oldest first, as the same
+ * { role, content } turns App already keeps for the transcript. It is optional.
+ *
+ * **Sending it is what makes follow-up questions work at all.** Without it the
+ * backend received "name them" on its own, searched your notes for those two
+ * words, and answered from whatever came back — which looked exactly like
+ * Nibble making things up, and was really the search being handed a question
+ * with the meaning removed. The backend uses the recent questions to work out
+ * what to search for. See docs/api.md under POST /ask.
+ *
+ * Only the last few turns are used, and the backend decides how many. Send the
+ * conversation and let it choose; do not trim it here, or the two halves of the
+ * app end up with different ideas about what "recent" means.
+ *
  * Returns { answer, sources }. Each source is
  * { document_id, filename, page, excerpt } — the pieces of your notes that were
  * put in front of the model.
@@ -242,10 +256,16 @@ export function search(query) {
  * or only notes stored before search existed. The backend does not call the
  * model in that case, and the answer says what to do about it.
  */
-export function ask(question) {
+export function ask(question, history = []) {
   return request('/ask', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ question }),
+    // Only `role` and `content` go up. A turn on screen also carries `sources`,
+    // and sending those back would be pointless at best — the backend already
+    // knows what it retrieved, and it re-retrieves for every question anyway.
+    body: JSON.stringify({
+      question,
+      history: history.map(({ role, content }) => ({ role, content })),
+    }),
   })
 }

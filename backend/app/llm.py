@@ -48,10 +48,24 @@ _TIMEOUT_SECONDS = 30
 #   answer. One fixed sentence is unmistakable, and it is one somebody can act
 #   on: go and add the chapter it should be in.
 #
-#   Rule 3 is what makes any of this checkable. The page number is how a student
+#   Rule 3 exists because rule 2 used to end "never soften this into a partial
+#   answer", and that clause was wrong in a way only real use revealed. Asked to
+#   name six experiments when the notes held five, Nibble answered: "That isn't
+#   in your notes yet. Your notes cover Experiments 1, 3, 4, 5, and 6." It had
+#   obeyed the prompt exactly and produced a refusal that contradicts itself in
+#   its own second sentence — while withholding five answers the student had
+#   every right to.
+#
+#   The distinction the prompt was missing is between *nothing* and *not
+#   everything*. Nothing is a refusal, and that has not moved an inch. Not
+#   everything is an answer plus an honest note about the gap, which is what a
+#   good tutor does and what somebody revising actually needs. Getting five of
+#   six with the sixth named as missing beats being told to go away.
+#
+#   Rule 4 is what makes any of this checkable. The page number is how a student
 #   goes and looks, and looking is the only real defence against a wrong answer.
 #
-#   Rule 4 is Nibble's voice from docs/design.md: warm, brief, plain words.
+#   Rule 5 is Nibble's voice from docs/design.md: warm, brief, plain words.
 #
 # None of this is hidden from the person asking. The pages it cites are the same
 # pages shown as chips under the answer, so every claim can be checked against
@@ -62,12 +76,16 @@ you have been given the pieces of their own notes that came closest to it.
 
 1. Answer using ONLY those notes. Do not use anything you know from anywhere \
 else, even if you are certain it is correct, and even if the notes look wrong.
-2. If the notes do not contain the answer, reply with exactly: "That isn't in \
-your notes yet." You may add one short sentence saying what they do cover. \
-Never guess, never fill a gap, never soften this into a partial answer.
-3. Cite the page for anything you say, like this: (p. 4). Cite the page the \
+2. If the notes contain NOTHING that answers the question, reply with exactly: \
+"That isn't in your notes yet." You may add one short sentence saying what they \
+do cover instead. Never guess and never fill a gap.
+3. If the notes answer PART of the question, give that part and then say plainly \
+what is missing — "Your notes don't have the second one." Do not refuse a \
+question you can partly answer, and do not invent the rest to complete it. \
+Rule 2 is for when there is nothing, not for when there is something incomplete.
+4. Cite the page for anything you say, like this: (p. 4). Cite the page the \
 words actually came from.
-4. Be warm and brief. Short sentences, plain words, no preamble. Do not say \
+5. Be warm and brief. Short sentences, plain words, no preamble. Do not say \
 "according to the notes" or "based on the provided context" — just answer.
 """
 
@@ -112,13 +130,50 @@ def build_context(chunks: list[dict]) -> str:
     )
 
 
-def answer(question: str, context: str) -> str:
+def _as_messages(history: list[dict] | None) -> list[dict]:
+    """Turn Nibble's own record of the conversation into what the API expects.
+
+    We say "nibble"; the API says "assistant". Translating here, in one place,
+    means the rest of the project never has to hold the provider's vocabulary in
+    its head — routes.py and the frontend both talk about turns being from the
+    person or from Nibble, which is what they are.
+
+    Anything with an unexpected role is dropped rather than passed through. The
+    route already rejects those with a 422, so reaching this is a bug rather
+    than a user; dropping keeps a bug from turning into a malformed request that
+    fails with something unreadable from the provider.
+    """
+    if not history:
+        return []
+
+    roles = {"user": "user", "nibble": "assistant"}
+
+    return [
+        {"role": roles[turn["role"]], "content": turn["content"]}
+        for turn in history
+        if turn.get("role") in roles and turn.get("content")
+    ]
+
+
+def answer(question: str, context: str, history: list[dict] | None = None) -> str:
     """Send one question and its notes to the model, and return what it says.
 
     ``context`` is the string from ``build_context``. This function does not
     search, does not decide what counts as relevant, and does not build the
     sources list. It asks about the notes it is handed and nothing else, which
     is what keeps it short enough to read and testable with a fake.
+
+    ``history`` is the recent conversation, oldest first, as
+    ``{"role": "user" | "nibble", "content": ...}``. It defaults to nothing, so
+    every existing caller and test keeps working unchanged.
+
+    **The history is context, not evidence, and the difference is the whole
+    point of this project.** Past turns are replayed so "explain the third one"
+    knows what "the third one" is. They are not notes, and rule 1 in the prompt
+    still binds the answer to the pieces in ``context`` — otherwise Nibble could
+    answer a follow-up out of something it said earlier, which is exactly the
+    "confident and disconnected from your notes" failure this file exists to
+    prevent, arriving one turn later than usual.
 
     Raises ``AnswerUnavailable`` for every way this can fail, and never lets the
     provider's own error text out to a person: it is written for whoever is
@@ -138,6 +193,12 @@ def answer(question: str, context: str) -> str:
                 "model": config.CHAT_MODEL,
                 "messages": [
                     {"role": "system", "content": SYSTEM_PROMPT},
+                    # The conversation so far, between the rules and this
+                    # question. It sits here rather than being pasted into the
+                    # message below so the model reads it as things that were
+                    # said, not as more notes to answer from — the notes are the
+                    # labelled block below, and only that block gets cited.
+                    *_as_messages(history),
                     # Notes first, question last, in one user message. The order
                     # matters more than it looks: a model weighs the last thing
                     # it read most heavily, and the last thing it should read is

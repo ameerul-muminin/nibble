@@ -94,7 +94,31 @@ def get_model() -> TextEmbedding:
     with _model_lock:
         if _model is None:
             try:
-                _model = TextEmbedding(model_name=config.EMBEDDING_MODEL)
+                # threads=1, and it is not a typo. Measured on a 16-core laptop,
+                # embedding 30 pieces:
+                #
+                #     threads=1     2.41s      ~2.4 CPU-seconds
+                #     threads=2     2.50s      ~5.0 CPU-seconds
+                #     threads=4     2.57s     ~10.3 CPU-seconds
+                #     threads=16    2.47s     ~39.5 CPU-seconds
+                #
+                # Read the first column: the extra threads buy nothing. This
+                # model is small enough that one core saturates it, and the
+                # threads spend their time synchronising rather than working.
+                #
+                # Now read the second column, because that is the one that
+                # matters on the deployed backend. Render's free tier gives us
+                # 0.1 CPU — ten milliseconds of CPU in every hundred. Left to
+                # itself, onnxruntime counts the HOST's cores, not our share of
+                # them, and starts a thread per core. Sixteen threads then queue
+                # for one tenth of one core, and every one of them stalls to the
+                # next scheduling window. The same work, spread across more
+                # threads than we are allowed to run, takes several times longer
+                # than doing it on one.
+                #
+                # So this line costs nothing on a laptop and is the single
+                # cheapest thing that makes an upload on the free host faster.
+                _model = TextEmbedding(model_name=config.EMBEDDING_MODEL, threads=1)
             except Exception as exc:  # every way this fails means the same thing to a person
                 raise EmbeddingUnavailable(
                     "The search model could not be loaded. The first run downloads "

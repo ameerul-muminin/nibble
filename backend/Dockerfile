@@ -43,6 +43,26 @@ RUN pip install --no-cache-dir --user .
 # which matters on Render because a free service sleeps after 15 minutes.
 ENV FASTEMBED_CACHE_PATH=/home/user/app/.fastembed_cache
 
+# --- One thread, on purpose ----------------------------------------------
+#
+# Render's free tier gives this container 0.1 CPU: ten milliseconds of CPU time
+# in every hundred. The maths libraries underneath onnxruntime do not know that.
+# They count the cores on the HOST machine — many — and start a thread for each
+# one, which then all queue for our one tenth of one core and spend most of
+# their time stalled waiting for the next scheduling window.
+#
+# embeddings.py already passes threads=1 to fastembed, and that is the setting
+# that matters. These two are the belt to its braces: they cover the libraries
+# that read the environment directly rather than being told by onnxruntime, and
+# they apply to the build step below as well as to the running server.
+#
+# Measured: on a 16-core laptop, one thread embeds 30 pieces in 2.41s and
+# sixteen threads take 2.47s. The parallelism was never buying anything; it was
+# only ever spending CPU we do not have here.
+ENV OMP_NUM_THREADS=1
+ENV OPENBLAS_NUM_THREADS=1
+ENV MKL_NUM_THREADS=1
+
 # It calls our own get_model() rather than fastembed directly, so the model name
 # comes from config.py and cannot drift away from the one the app really uses.
 # CLERK_ISSUER is set to a throwaway value for this one command because

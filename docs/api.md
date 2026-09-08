@@ -257,8 +257,42 @@ The main endpoint. Searches, then asks the model to answer from what it found.
 Request:
 
 ```json
-{ "question": "explain osmosis simply" }
+{
+  "question": "name them",
+  "history": [
+    { "role": "user", "content": "What are the experiments?" },
+    { "role": "nibble", "content": "The lab has six experiments (p. 1)." }
+  ]
+}
 ```
+
+`history` is optional — leave it out and this behaves exactly as it did before.
+
+**Why it exists.** The frontend draws a conversation, so people write follow-ups:
+"name them", "why?", "explain the third one". Without history the backend saw
+only `"name them"`, embedded those two words, and searched for them — which
+matches nothing in particular, so it returned near-random pieces and the model
+answered from those. It looked like the model making things up. It was the
+search being handed a question with the meaning removed.
+
+`history` is used **twice**, and both matter:
+
+1. **To search.** The recent `user` turns are joined onto the question to make
+   the text that gets embedded, so "name them" searches for what you were
+   actually asking about. This is the half that fixes the bad answers.
+2. **To answer.** The turns are replayed to the model so "them" has something to
+   point at.
+
+Rules, because this comes from the browser and nothing from the browser is
+trusted:
+
+- At most `ASK_HISTORY_TURNS` turns are read, **the most recent ones**. Anything
+  longer is truncated rather than rejected.
+- `role` must be `"user"` or `"nibble"`. Anything else is a `422`.
+- Each `content` is cut to `ASK_HISTORY_CHARS`. A long transcript cannot be used
+  to smuggle a large payload past the model, or to push the notes out of its
+  context.
+- History is never stored, and never searched. It shapes this one question.
 
 Response:
 
@@ -279,15 +313,23 @@ Response:
 `sources` is empty when nothing relevant was found — and the answer says so
 rather than guessing.
 
-**`sources` is what Nibble read, not what it quoted.** It is the same pieces
-`POST /search` would return for that question, capped at the same `TOP_K`, and
-they are the only thing the model was shown. Working out which pages a given
+**`sources` is what Nibble read, not what it quoted.** It is the pieces
+`POST /search` would return for that question, and they are the only thing the
+model was shown. Working out which pages a given
 sentence actually used would mean parsing the citations back out of the answer,
 and being wrong there is worse than not guessing: it would either hide a page
 that was used or claim one that was not. Show these as the pages it read.
 
 `excerpt` is the first 200 characters of the piece, with `…` on the end if it
 was cut. It is there to point at a page, not to reprint it.
+
+**One entry per page, so `sources` is usually shorter than `TOP_K`.** Retrieval
+works on pieces and a single page often supplies two of them, which used to
+arrive as `p. 1` listed twice with different excerpts — indistinguishable from a
+bug to anyone reading it. They are collapsed to one entry per
+`(filename, page)`, keeping the best-scoring excerpt, **after** the model has
+been given all of them. The model still reads every piece; only the list on
+screen is deduplicated.
 
 **A refusal is a normal `200`.** When the notes do not cover the question the
 answer says so — "That isn't in your notes yet." — and `sources` still lists what
@@ -302,6 +344,7 @@ model is not called at all.**
 | --- | --- |
 | `200` | An answer, a refusal, or "nothing in your notes about that yet" |
 | `400` | The question is empty, or only whitespace |
+| `422` | A `history` turn has a `role` that is not `"user"` or `"nibble"` |
 | `503` | The embedding model could not be loaded, or the answering service could not be reached |
 
 ---

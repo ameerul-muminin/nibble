@@ -129,7 +129,54 @@ OCR_RETRY_WAIT_SECONDS = 20
 # --- Tuning knobs --------------------------------------------------------
 CHUNK_SIZE = 900  # how many characters in one piece of a document
 CHUNK_OVERLAP = 150  # how much each piece repeats of the one before it
-TOP_K = 5  # how many pieces we hand to the model when answering
+
+# How many pieces we hand to the model when answering.
+#
+# **This was 5, and 5 was measurably too few.** The number was picked before
+# anybody had asked a real question of a real document, and the first person who
+# did found it immediately: asked to name the six experiments in an 11-page lab
+# PDF, Nibble named one. It was not making things up — it had been shown five
+# pieces, and four of the six headings were not among them. Retrieval starved it
+# and the model answered from what it had.
+#
+# Measured on that PDF: reaching every one of the six experiment headings needed
+# 11 of its 12 pieces. So full coverage is not what this number can buy, and
+# chasing it is the wrong instinct. What it can buy is enough room that a
+# document-wide question ("what is this about", "what does it cover") sees more
+# than one corner of the file.
+#
+# 12 rather than more, and this is the real tension: every extra piece is more
+# text that is only loosely related to the question, and the most important
+# behaviour in this project is that Nibble REFUSES when your notes do not cover
+# something. Pile in enough weakly-matching text and a model starts finding
+# something to say in it. 12 is roughly 11,000 characters — a big enough view of
+# a chapter to answer "what is this about", small enough that a genuine miss
+# still looks like a miss.
+#
+# Raise it and re-check the refusal, not just the answers. That is the thing
+# that breaks first, and it breaks quietly.
+TOP_K = 12
+
+# How much of the conversation is used to shape the next question. Slice 4 fix.
+#
+# The frontend draws a chat, so people write follow-ups — "name them", "why?",
+# "explain the third one". Every one of those is meaningless on its own, and
+# before this the backend embedded it on its own and searched for it. "name
+# them" matched nothing in particular, returned near-random pieces, and the
+# answer built from them read as the model inventing things. It was not. It was
+# a search handed a question with the meaning taken out.
+#
+# 4 turns is two exchanges, which covers "what are the experiments" -> "name
+# them" -> "explain the third one" without letting a long session drag the
+# search back toward whatever was being discussed ten questions ago. A follow-up
+# is about what was JUST said; older turns are noise dressed as context.
+ASK_HISTORY_TURNS = 4
+
+# The most of one past turn we will read. Nothing from a browser is trusted, and
+# this is the cap that makes that true here: without it a crafted transcript
+# could push the actual notes out of the model's context, which is the one way
+# to make Nibble answer from something other than your notes.
+ASK_HISTORY_CHARS = 1000
 
 # --- Who is allowed to call us -------------------------------------------
 # A browser will refuse to let a page on :5173 call :8000 unless we say so.
