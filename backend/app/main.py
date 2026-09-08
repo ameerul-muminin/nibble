@@ -14,13 +14,38 @@ routes.py.
 
 import threading
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app import config, embeddings
+from app.db import DatabaseOutOfDate
 from app.routes import router
 
 app = FastAPI(title="Nibble API", version="0.1.0")
+
+
+@app.exception_handler(DatabaseOutOfDate)
+def database_out_of_date(request: Request, exc: DatabaseOutOfDate):
+    """Turn an out-of-date database file into a sentence the frontend can show.
+
+    Every route that touches the database can raise this, because every one of
+    them calls ``get_db()``. Handling it here rather than wrapping six routes in
+    the same ``try`` is the whole reason this exists — six copies is six places
+    to forget, and the one that gets forgotten is the one somebody hits.
+
+    ``detail`` is the key on purpose: it is the same shape every ``HTTPException``
+    in routes.py produces, so ``api.js`` already knows how to read it and shows
+    the sentence unchanged. A new shape here would have needed a new branch there.
+
+    503 rather than 500, because that is what this is — the server is fine, its
+    database file is from an older version of Nibble, and it will work again the
+    moment that is dealt with.
+    """
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={"detail": str(exc)},
+    )
 
 
 @app.on_event("startup")

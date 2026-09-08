@@ -122,3 +122,39 @@ def test_a_database_from_before_notes_had_owners_is_refused():
 
     with pytest.raises(RuntimeError, match="Delete the file"):
         get_db()
+
+
+def test_an_out_of_date_database_reaches_a_person_as_a_sentence(tmp_path, monkeypatch):
+    """The message is only half the job; the other half is it leaving the server.
+
+    This was a bare RuntimeError, which FastAPI turns into a 500 whose body is
+    the words "Internal Server Error". The helpful sentence sat in the log while
+    the person on the other end was told to check a backend that was running.
+
+    The `signed_in` fixture in conftest.py already gets this past auth, so this
+    reaches the database the way a real signed-in request would.
+    """
+    import sqlite3
+
+    from fastapi.testclient import TestClient
+
+    # A database with the pre-slice-4.5 shape: documents, but no user_id.
+    old = tmp_path / "old.db"
+    conn = sqlite3.connect(old)
+    conn.execute(
+        "CREATE TABLE documents (id INTEGER PRIMARY KEY, filename TEXT, "
+        "page_count INTEGER, created_at TEXT)"
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr("app.config.DATABASE_FILE", str(old))
+
+    from app.main import app
+
+    response = TestClient(app).get("/documents")
+
+    assert response.status_code == 503
+    detail = response.json()["detail"]
+    assert "Delete the file" in detail
+    assert "Internal Server Error" not in detail

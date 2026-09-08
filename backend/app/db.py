@@ -97,6 +97,27 @@ def get_db() -> sqlite3.Connection:
     return conn
 
 
+class DatabaseOutOfDate(RuntimeError):
+    """The database file predates slice 4.5, so notes in it have no owner.
+
+    Its own type for exactly the reason ``ocr.OcrUnavailable``,
+    ``embeddings.EmbeddingUnavailable`` and ``llm.AnswerUnavailable`` have one:
+    so something upstream can catch precisely this and turn it into a sentence
+    somebody can act on.
+
+    **It was a bare RuntimeError until 2026-09-09, and that cost real time.**
+    The message below is a good one — it names the file and says exactly what to
+    do — but a bare RuntimeError becomes a FastAPI 500 whose body is the words
+    "Internal Server Error", so the sentence never left the server. It sat in
+    the log while the person on the other end was told to check whether the
+    backend was running, which it was. Writing a helpful message is only half of
+    it; the other half is making sure it can reach somebody.
+
+    Still a RuntimeError underneath, so anything already catching that keeps
+    working.
+    """
+
+
 def _check_shape(conn: sqlite3.Connection) -> None:
     """Refuse to run against a database from before notes had owners.
 
@@ -127,7 +148,7 @@ def _check_shape(conn: sqlite3.Connection) -> None:
 
     if "user_id" not in columns:
         conn.close()
-        raise RuntimeError(
+        raise DatabaseOutOfDate(
             f"The database file '{config.DATABASE_FILE}' was made before notes "
             "had owners, so Nibble cannot tell whose notes are whose in it. "
             "Delete the file and start the backend again — it will build a fresh "

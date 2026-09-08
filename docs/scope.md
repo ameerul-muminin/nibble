@@ -1911,6 +1911,40 @@ this cannot be asserted in a test:
 The refusal is intact and the partial answer is fixed. That table is the
 evidence, and it is the check issue #15 asks for.
 
+### And a fourth: a good error message that could not reach anybody
+
+Found the same afternoon, and worth writing down because the lesson generalises.
+
+The notes list failed with *"Could not load your notes. Check the backend is
+running."* The backend was running perfectly. The real cause was a `nibble.db`
+from before slice 4.5 — no `user_id` column — and `db.py` had a genuinely
+excellent message for exactly that, naming the file and the fix.
+
+**Nobody ever saw it.** It was lost three times over:
+
+1. `_check_shape` raised a bare `RuntimeError`, so FastAPI returned a 500 whose
+   body is the two words "Internal Server Error". The sentence never left the
+   server.
+2. `api.js` had no `detail` to show for a 500, so it fell back to a generic line.
+3. `App.jsx` discarded the error object entirely and printed a fixed string
+   guessing the backend was down.
+
+So the one component that knew what was wrong told the log, and the UI told
+somebody to go and check the thing that was fine.
+
+Fixed at all three layers. `DatabaseOutOfDate` is now its own exception type —
+the same pattern `OcrUnavailable`, `EmbeddingUnavailable` and `AnswerUnavailable`
+already use — and one handler in `main.py` turns it into a 503 with `detail`,
+which is the shape `api.js` already knew how to read. `App.jsx` shows what the
+server said and keeps its fixed line only for when the server said nothing.
+
+Verified against the actual stale database file, through the real app: **503,
+with the real sentence.**
+
+**The lesson is the part worth keeping.** Writing a helpful error message is
+only half the work. The other half is checking it can actually reach a person —
+and this project now has an example of a perfect message that could not.
+
 ### Still owed
 - [ ] **Time an upload on Render again once this deploys.** The prediction is a
       real improvement and not a fix — 0.1 CPU is still 0.1 CPU. If it is still

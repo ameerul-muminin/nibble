@@ -105,6 +105,12 @@ function Nibble() {
   // Three separate small states rather than one big one, because they change
   // at different times and mixing them makes it harder to see what is going on.
   const [docsStatus, setDocsStatus] = useState('loading') // loading | ready | failed
+
+  // What the backend said when the list failed to load, or null if it said
+  // nothing useful. Kept separately from docsStatus because "it failed" and
+  // "here is why" are two different facts, and the second one is the one that
+  // saves somebody an hour.
+  const [docsError, setDocsError] = useState(null)
   // True while an upload is in flight. A typed file is instant; a scan or a
   // photo goes to the vision model a page at a time and takes seconds, which
   // is why the button says "Reading…" rather than nothing at all.
@@ -157,8 +163,17 @@ function Nibble() {
         // value instead.
         setSelectedId((current) => (rows.some((row) => row.id === current) ? current : null))
       })
-      .catch(() => {
+      .catch((error) => {
         if (ignore) return
+
+        // Keep the backend's own sentence. This used to throw the error away
+        // and show a fixed line guessing the backend was down — and the day the
+        // database file turned out to be from before notes had owners, the
+        // backend said exactly that, in words naming the fix, and the guess
+        // replaced it. Somebody then spent a while checking a backend that was
+        // running perfectly. Show what the server said whenever it said
+        // anything; the guess is only for when it truly said nothing.
+        setDocsError(error?.message || null)
         setDocsStatus('failed')
       })
 
@@ -890,7 +905,7 @@ function Nibble() {
         {docsStatus === 'failed' && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--gap)' }}>
             <p style={{ color: 'var(--text-muted)', margin: 0 }}>
-              Could not load your notes. Check the backend is running.
+              {docsError || 'Could not load your notes. Check the backend is running.'}
             </p>
             <button
               type="button"
