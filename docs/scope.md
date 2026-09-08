@@ -1678,10 +1678,19 @@ laptop.
       answers 200 with no token, `/documents` and `/ask` answer 401 without one,
       and a CORS preflight from the Vercel origin comes back allowing exactly that
       origin — not a wildcard.
-- [ ] **Nobody has opened the deployed site in a browser.** Everything above is
-      HTTP-level, which says nothing about whether the page renders. This is the
-      same gap slices 2, 3 and 4 each left behind, arriving by a third route: a
-      green check is not a person having looked.
+- [x] **Opened in a browser, by a person, 2026-09-08.** The deployed site loads,
+      Clerk sign-in works, and more than one account has signed in. Everything
+      before this was HTTP-level and said nothing about whether the page renders.
+      **This is the first time on this project that the browser check has actually
+      been closed** — slices 2, 3 and 4 each left it open and it is still open on
+      slice 4's chat UI.
+
+      Worth recording for the demo: **the Vercel URL needed nothing added to
+      Clerk.** [`deploying.md`](./deploying.md) says to add it to Clerk's Domains
+      list, and that step is written for a **production** Clerk instance. Nibble
+      is on a development instance (`clerk doctor` reports production as not
+      configured), and those are not domain-locked. If Nibble ever gets a real
+      domain and a production instance, that step comes back.
 - [ ] **Time one real upload on Render.** The free tier gives 0.1 of a CPU and
       every timing in this project was measured on a laptop. Nobody knows yet how
       slow embedding is on a fraction of a shared core. This is the open risk in

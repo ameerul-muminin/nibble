@@ -166,11 +166,27 @@ the deployed backend still works while you develop against it.
 
 Changing a variable redeploys the service. Wait for **Live** again.
 
-### 2. Tell Clerk about the frontend
+### 2. Tell Clerk about the frontend — **only if you are on a production instance**
 
-Clerk dashboard → your application → **Domains**, and add the Vercel address.
-Without this, Clerk refuses to load on the deployed site and the page stays
+**On a development Clerk instance there is nothing to do here.** Development
+instances are not domain-locked, so the Vercel address just works. This was
+checked on 2026-09-08: the deployed site loaded and signed in with nothing added
+to Clerk at all.
+
+You can tell which you are on:
+
+```bash
+clerk doctor
+```
+
+If it says *"production not configured"*, skip this step entirely.
+
+**On a production instance**, add the Vercel address at Clerk dashboard → your
+application → **Domains**. Without it Clerk refuses to load and the page stays
 blank — which looks like a broken build and is not one.
+
+Production keys also need a domain you control, and `.vercel.app` is not one — so
+this step only starts mattering the day Nibble gets a real domain.
 
 ---
 
