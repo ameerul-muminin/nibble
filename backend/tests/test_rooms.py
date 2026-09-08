@@ -528,3 +528,120 @@ def test_deleting_the_note_takes_the_rooms_too(client, room):
     assert client.delete("/documents/1").status_code == 204
 
     assert client.get("/rooms").json() == []
+
+
+# ---------------------------------------------------------------------------
+# The four windows between a check and the write that follows it
+# ---------------------------------------------------------------------------
+#
+# Every route here reads before it writes, and the read is not inside the write.
+# Something else can commit in the gap. None of these can be provoked by timing
+# a real request — the window is a millisecond wide — so each test forces the
+# interleaving instead, by making the second look at the world return what it
+# would have returned had the race actually happened.
+#
+# What that does and does not prove: it proves the handling is right and, for
+# two of them, that the rollback really does undo the write. It does not prove
+# the window is as narrow as the comments in routes.py say. Nothing in a test
+# suite can.
+
+
+def _count(tmp_path, table):
+    import sqlite3
+
+    db = sqlite3.connect(str(tmp_path / "test_nibble.db"))
+    total = db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+    db.close()
+    return total
+
+
+def test_a_paper_handed_in_as_the_class_ends_is_not_stored(client, sat, monkeypatch, tmp_path):
+    """The teacher presses End between the state check and the insert.
+
+    The paper must not survive it, or a class that has finished collects one
+    more submission and the teacher marks something that arrived too late.
+    """
+    monkeypatch.setattr("app.routes._state_now", lambda db, room_id: "closed")
+
+    response = _paper(client, sat["id"])
+
+    assert response.status_code == 400
+    assert "ended" in response.json()["detail"]
+    # The rollback is the half worth asserting: the INSERT had already run.
+    assert _count(tmp_path, "answers") == 0
+
+
+def test_a_second_paper_racing_the_first_is_a_sentence_not_a_500(
+    client, sat, monkeypatch, tmp_path
+):
+    """Two submissions at once both get past the friendly check.
+
+    The UNIQUE in db.py refuses the second. Uncaught that is a 500 and an
+    "Internal Server Error" on the one action a student cares about.
+    """
+    _paper(client, sat["id"])
+
+    # What the second request would have seen: no paper in yet, because the
+    # first had not committed when it looked.
+    monkeypatch.setattr("app.routes._has_handed_in", lambda db, room_id, user_id: False)
+
+    response = _paper(client, sat["id"])
+
+    assert response.status_code == 400
+    assert "already" in response.json()["detail"]
+    # The first paper is untouched — three answers, not six and not none.
+    assert _count(tmp_path, "answers") == 3
+
+
+def test_joining_as_the_class_ends_leaves_no_member(
+    client, room, monkeypatch, signed_in_as, tmp_path
+):
+    """The teacher presses End between the state check and the member insert.
+
+    Left alone this puts a student in a class that is over, and the teacher's
+    joiner count goes up after the class has finished.
+    """
+    monkeypatch.setattr("app.routes._state_now", lambda db, room_id: "closed")
+    signed_in_as(OTHER_USER_ID)
+
+    response = _join(client, room["code"])
+
+    assert response.status_code == 400
+    assert "ended" in response.json()["detail"]
+    assert _count(tmp_path, "room_members") == 0
+
+
+def test_two_classes_opened_on_the_same_code_is_a_sentence_not_a_500(client, room, monkeypatch):
+    """Two rooms are told the same code is free before either takes it.
+
+    It needs two of a billion inside a one-millisecond window, so it will very
+    likely never happen. What it must not do is hand a teacher a traceback.
+    """
+    monkeypatch.setattr("app.routes._new_code", lambda db: room["code"])
+
+    response = client.post("/rooms", json={"quiz_id": 1})
+
+    assert response.status_code == 503
+    assert "try again" in response.json()["detail"].lower()
+
+
+def test_the_quiz_being_deleted_as_the_class_opens_is_a_404(client, room, monkeypatch):
+    """The other thing that can break that same INSERT, told apart from it.
+
+    A quiz deleted from another tab between the ownership check and the insert
+    trips the foreign key, which raises the same error a duplicate code does.
+    They are told apart by asking the database again — never by reading
+    SQLite's message text, which is not ours and can be reworded.
+    """
+
+    def delete_it_first(db):
+        db.execute("DELETE FROM quizzes WHERE id = 1")
+        db.commit()
+        return "ZZZZ99"
+
+    monkeypatch.setattr("app.routes._new_code", delete_it_first)
+
+    response = client.post("/rooms", json={"quiz_id": 1})
+
+    assert response.status_code == 404
+    assert "deleted" in response.json()["detail"]

@@ -2678,9 +2678,60 @@ prevent in the first place. A choice made on the landing page, before signing in
 would go with it. `App` is never unmounted, so the value survives, and it is
 passed back down as a prop.
 
+### Four races found in review, all four valid, all four fixed
+
+Every room route reads before it writes — is the class open, has this person
+answered, is this code free — and **the read is not inside the write**. Something
+else can commit in that gap. Review found four of them and they were all real,
+though only two could do damage worth the name:
+
+- **A paper stored after the class ended.** The teacher presses End between the
+  state check and the insert. This is the one that matters: it breaks the thing
+  `closed` exists to guarantee, and it puts a submission that arrived too late
+  into the teacher's marking. It is also the likeliest, because "time's up" and
+  a straggler handing in is a real classroom moment rather than a hypothetical.
+- **A second paper from the same student arriving at the same instant** — a
+  double-tap, or two tabs. Both get past the friendly check, the UNIQUE refuses
+  the second, and uncaught that is a **500** on the one action a student cares
+  about. `api.md` documents a 400 and a sentence.
+- **A student joining as the class ends.** A member row on a closed room and a
+  joiner count that rises after the class is over. Cosmetic — the student's
+  screen corrects itself three seconds later — and fixed because the fix was
+  already being written for the one above.
+- **Two rooms told the same code is free.** Needs two of a billion *and* the
+  same millisecond, so it will realistically never happen. Fixed because what it
+  did when it happened was hand a teacher a traceback.
+
+**Two different fixes, because the two situations are not the same.**
+
+Where a constraint already answers the question — a duplicate paper, a duplicate
+code — the constraint is what gets asked, and the error it raises is caught and
+turned into the sentence. That is not a new idea here: it is written out over the
+INSERT in `create_quiz`, in the words *"a re-check is the same race one line
+further down… the constraint is the only thing that can answer this without a
+gap"*.
+
+Where nothing constrains it — a room's `state` does not constrain an insert into
+`answers` — the check is **asked again after the insert and before the commit**,
+and the paper is rolled back if the answer changed. That works for one specific
+reason, written out over `_state_now()`: SQLite allows one writer at a time, so
+once our insert has begun, the teacher's End cannot commit until we finish. By
+that line the state has stopped moving. A re-check anywhere earlier would have
+been the same race a second time.
+
+**No contract changed.** Every status and sentence in `api.md` already covered
+these; what changed is that the code now delivers them instead of a 500.
+
+**Five tests, and what they do not prove.** None of these can be provoked by
+timing a real request, so each test forces the interleaving instead — the second
+look at the world is made to return what it would have returned had the race
+happened. That proves the handling is right, and for two of them that the
+rollback really does undo a write that had already run. It does not prove the
+window is as narrow as the comments claim. Nothing in a test suite can.
+
 ### Checked by running it, and what that does and does not prove
 
-- **310 backend tests pass**, 40 of them new. The four rules from the plan each
+- **315 backend tests pass**, 45 of them new. The four rules from the plan each
   have a test, and the answer-key one asserts on the **keys** of the response
   rather than on a value — the way that rule breaks is a field arriving that
   nobody meant to send, and `correct != 1` would not notice a `dict(row)`.

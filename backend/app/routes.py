@@ -1495,6 +1495,58 @@ def _own_room(db, room_id: int, user_id: str) -> None:
         )
 
 
+def _state_now(db, room_id: int) -> str | None:
+    """The room's state, read again after a write and before the commit.
+
+    **This exists for a gap that is invisible in the code and real in a
+    classroom.** Every route here reads before it writes, and the read is not
+    inside the write — a `SELECT` on this connection is its own little moment,
+    so between "the class is open" and "store this paper" the teacher can press
+    End and have it land. The paper is then stored after the class ended, which
+    is exactly what the contract says cannot happen.
+
+    Re-checking one line further down would normally be the same race again —
+    that is the reasoning written over the INSERT in create_quiz, and it is why
+    that one asks the constraint instead. What makes a re-check work *here* is
+    where it is called from: **after the INSERT and before the commit**, with
+    the write already begun.
+
+    SQLite allows exactly one writer at a time. Once our INSERT has started,
+    the teacher's UPDATE cannot commit until we finish, so by this point the
+    state is settled and cannot move under us:
+
+      * If End committed **before** our INSERT, we see `closed` here and the
+        caller rolls the paper back. Nothing is stored.
+      * If End arrives **after**, it waits for us. The paper was handed in
+        before the class ended, and that is the honest reading of it.
+
+    Returns None if the room has been deleted outright, which the callers treat
+    the same as closed — there is nothing to hand in to either way.
+    """
+    row = db.execute("SELECT state FROM rooms WHERE id = ?", (room_id,)).fetchone()
+
+    return None if row is None else row["state"]
+
+
+def _has_handed_in(db, room_id: int, user_id: str) -> bool:
+    """Has this person already handed a paper in for this room?
+
+    One answer row is enough — a paper is written all at once, so the presence
+    of any row means the whole thing is in.
+
+    This is the friendly check, not the enforcing one. Two submissions sent at
+    the same instant can both pass it before either writes; the UNIQUE in db.py
+    is what actually refuses the second, and submit_answers catches that and
+    says the same sentence this one does.
+    """
+    row = db.execute(
+        "SELECT id FROM answers WHERE room_id = ? AND user_id = ? LIMIT 1",
+        (room_id, user_id),
+    ).fetchone()
+
+    return row is not None
+
+
 def _room_for_teacher(db, room_id: int) -> dict:
     """One room, in the shape docs/api.md promises the teacher's screen.
 
@@ -1616,11 +1668,39 @@ def create_room(request: RoomRequest, user_id: str = Depends(current_user_id)):
                 detail="That quiz isn’t here. It may already have been deleted.",
             )
 
-        cursor = db.execute(
-            "INSERT INTO rooms (owner_id, quiz_id, code, state, created_at) "
-            "VALUES (?, ?, ?, 'waiting', ?)",
-            (user_id, request.quiz_id, _new_code(db), created_at),
-        )
+        # _new_code asks whether a code is free, and this INSERT is what makes it
+        # taken — two separate moments, so two rooms opened at the same instant
+        # can both be told the same code is free. It needs two of a billion to
+        # collide *and* to collide inside that window, so it will almost
+        # certainly never happen; the point is what it does when it does.
+        # Uncaught, the UNIQUE on rooms.code makes it a 500 with a traceback,
+        # and api.md documents a 503 with a sentence.
+        #
+        # The FOREIGN KEY can raise the same error for a different reason: the
+        # quiz checked six lines up can be deleted from another tab before this
+        # runs. Telling those apart by asking the database again is honest;
+        # telling them apart by reading SQLite's message text would break the
+        # day SQLite rewords it.
+        try:
+            cursor = db.execute(
+                "INSERT INTO rooms (owner_id, quiz_id, code, state, created_at) "
+                "VALUES (?, ?, ?, 'waiting', ?)",
+                (user_id, request.quiz_id, _new_code(db), created_at),
+            )
+        except sqlite3.IntegrityError as exc:
+            gone = db.execute("SELECT id FROM quizzes WHERE id = ?", (request.quiz_id,)).fetchone()
+
+            if gone is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="That quiz was deleted just now, so there is no class to open.",
+                ) from exc
+
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Nibble couldn’t open a class just then. Try again.",
+            ) from exc
+
         db.commit()
 
         return _room_for_teacher(db, cursor.lastrowid)
@@ -1806,13 +1886,35 @@ def join_room(request: JoinRequest, user_id: str = Depends(current_user_id)):
             "INSERT OR IGNORE INTO room_members (room_id, user_id, joined_at) VALUES (?, ?, ?)",
             (room["id"], user_id, joined_at),
         )
+
+        # The teacher can press End between the check above and the insert, and
+        # the student then joins a class that is over: a member row on a closed
+        # room, a teacher's count that goes up after the class finished, and a
+        # `state` in this reply that was true a moment ago and is not now.
+        #
+        # The last of those fixes itself — the student screen polls three
+        # seconds later and finds `closed`. The row does not, so it is undone
+        # here. See _state_now for why re-checking works at this point and not
+        # at the point above.
+        state = _state_now(db, room["id"])
+
+        if state in (None, "closed"):
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="That class has already ended.",
+            )
+
         db.commit()
 
         return {
             "room_id": room["id"],
             "code": room["code"],
             "title": room["title"],
-            "state": room["state"],
+            # The state as it is now, not as it was when the room was looked up.
+            # They are the same except in the window described above, and in
+            # that window this one is the true answer.
+            "state": state,
         }
     finally:
         db.close()
@@ -1903,12 +2005,7 @@ def submit_answers(
                 ),
             )
 
-        already = db.execute(
-            "SELECT id FROM answers WHERE room_id = ? AND user_id = ? LIMIT 1",
-            (room_id, user_id),
-        ).fetchone()
-
-        if already is not None:
+        if _has_handed_in(db, room_id, user_id):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="You’ve already handed this one in.",
@@ -1966,11 +2063,41 @@ def submit_answers(
             mark = 1 if answer.chosen == key[answer.question_id] else 0
             rows.append((room_id, user_id, answer.question_id, answer.chosen, mark, answered_at))
 
-        db.executemany(
-            "INSERT INTO answers (room_id, user_id, question_id, chosen, mark, answered_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            rows,
-        )
+        # The same paper sent twice at once — a double-tap on Hand it in, or two
+        # tabs — puts both requests past the `already` check above before either
+        # writes. The UNIQUE (room_id, user_id, question_id) in db.py is what
+        # actually stops the second one, and uncaught it is a 500 for something
+        # api.md documents as a 400 with a sentence.
+        #
+        # Caught rather than checked harder, for the reason written over the
+        # INSERT in create_quiz: a second check is the same race one line
+        # further down, and the constraint is the only thing that can answer
+        # without a gap.
+        try:
+            db.executemany(
+                "INSERT INTO answers (room_id, user_id, question_id, chosen, mark, answered_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                rows,
+            )
+        except sqlite3.IntegrityError as exc:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You’ve already handed this one in.",
+            ) from exc
+
+        # And the teacher can press End between the state check at the top of
+        # this route and the insert just above, which would store a paper for a
+        # class that had already finished — the one thing the closed state is
+        # for. See _state_now for why asking again *here*, after the write and
+        # before the commit, is not simply the same race a second time.
+        if _state_now(db, room_id) != "open":
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="That class has ended, so answers are closed.",
+            )
+
         db.commit()
     finally:
         db.close()
