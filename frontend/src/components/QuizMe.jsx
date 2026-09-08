@@ -107,12 +107,9 @@ export function QuizMe({ docs, onNoteGone }) {
     const name = title.trim()
     if (!noteId || !name) return
 
-    // Claims the newest run, so a quiz still loading cannot land on top of the
-    // one being made here. Unconditional, unlike the delete below, because
-    // making a quiz IS a request to put that quiz on screen. See openRun above.
-    const run = openRun.current + 1
-    openRun.current = run
-    openingId.current = null
+    // Noted, not claimed. The run is only taken over once the quiz actually
+    // exists — see below, and see handleDeleteQuiz for the same rule.
+    const runAtStart = openRun.current
 
     setBusy(true)
     setNotice(null)
@@ -123,9 +120,21 @@ export function QuizMe({ docs, onNoteGone }) {
       // gets questions wrong and you fix them, so landing on the list would put
       // an extra click in front of the thing you came to do.
       //
-      // ...unless something newer was asked for while this was writing, which
-      // takes seconds and is the easiest of all of these to click past.
-      if (openRun.current === run) {
+      // **The run is claimed here, on success, and not at the top.** Claiming it
+      // up front cancelled any quiz that was still opening — on the assumption
+      // that this creation would work. Generation is the request in this app
+      // most likely NOT to: it calls the model, and a rate limit or a rejected
+      // reply is an ordinary afternoon on the free tier. Every one of those
+      // failures also threw away an open the person was still waiting for, and
+      // told them only about the generation.
+      //
+      // The `===` is what keeps it honest in the other direction: if something
+      // newer was asked for while this was writing — and writing takes seconds,
+      // so it is the easiest of all of these to click past — that newer thing
+      // keeps the screen and the finished quiz just joins the list below.
+      if (openRun.current === runAtStart) {
+        openRun.current = runAtStart + 1
+        openingId.current = null
         setOpen(quiz)
         setMode('editing')
       }

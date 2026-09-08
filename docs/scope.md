@@ -2431,10 +2431,35 @@ the original bug: the sole reason to cancel is that the quiz is gone. If the
 open's reply already landed while the delete was in flight, it is on screen and
 the existing `setOpen` line takes it off again.
 
-**Three rounds on four lines**, and the shape is worth keeping: *cancel on the
-outcome, never on the intention.* A guard that fires before the thing it is
-guarding against has happened will be wrong exactly as often as that thing
-fails.
+**Then a fourth round**, because the delete was fixed and the identical flaw was
+left sitting in `handleCreate`. It claimed the run at the top, so a failed
+generation cancelled an open that was still in flight.
+
+That one bites harder than the delete did. **Generating is the request in this
+app most likely to fail** — it calls the model, and a rate limit or a rejected
+reply is an ordinary afternoon on the free tier. Every one of those failures was
+also throwing away a navigation, and reporting only the generation.
+
+Now the run is claimed on success. If something newer was asked for while the
+questions were being written — seconds, easily clicked past — that newer thing
+keeps the screen and the finished quiz just joins the list.
+
+**Four rounds on the same handful of lines**, and the rule that would have
+prevented three of them: *cancel on the outcome, never on the intention.* A
+guard that fires before the thing it is guarding against has happened is wrong
+exactly as often as that thing fails.
+
+Worth auditing by that rule rather than waiting for the next review. Every place
+this component touches `openRun`:
+
+| where | claims on | correct because |
+| --- | --- | --- |
+| `handleCreate` | success | the quiz might not get written |
+| `handleDeleteQuiz` | success | the delete might not go through |
+| `handleOpen` | immediately | navigating cannot fail; its own reply is guarded |
+| "← All quizzes" | immediately | no request at all, so intention *is* outcome |
+
+Only the two with a request that can fail needed the fix, and both now have it.
 
 ### The 400 came back, and this time it was intermittent
 
