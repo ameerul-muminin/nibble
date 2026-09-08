@@ -1,0 +1,422 @@
+"""Ask the model to write questions from a note, and check what comes back.
+
+Alif owns this file. It is the second place in the backend that calls the chat
+model, and it is deliberately shaped like the first: a prompt, one function that
+sends it, and one exception type for every way it can fail. If you have read
+llm.py, you have already read most of this.
+
+**The difference from llm.py is what happens to the reply.** ``llm.answer``
+takes a sentence and hands it straight to a person, who can read it and judge
+it. A quiz is not read, it is *used* — the browser marks answers against
+``correct`` without anybody checking it first. So a reply that is nearly right
+is worse here than a reply that fails: a question with ``correct: 4`` and four
+options marks every answer wrong, for one person practising alone or for a whole
+class at once, and nothing on screen looks broken.
+
+That is why the second half of this file is a validator rather than a
+``json.loads``. **Every field is checked before a single row is written.** A
+model returning almost-right JSON is the realistic failure here, not a model
+returning nonsense.
+
+Three things, in the order they are used:
+
+    build_prompt(chunks)     -> the note, as much of it as fits
+    make_questions(...)      -> validated questions, ready to store
+    QuizUnavailable          -> raised when we could not get usable ones
+"""
+
+import json
+
+import requests
+
+from app import config, llm
+
+# Longer than llm.py's 30 seconds, and for a plain reason: this writes ten
+# questions where that writes one sentence, at a higher reasoning effort. The
+# route warns the browser it takes a few seconds; this is the ceiling before we
+# stop waiting and say so.
+_TIMEOUT_SECONDS = 60
+
+# How many options every question has. Four is not configurable, and that is on
+# purpose rather than an oversight: `correct` is an index into this list, the
+# frontend renders exactly four buttons, and the validator below rejects
+# anything else. Making it a setting would mean three places that can disagree.
+OPTION_COUNT = 4
+
+QUIZ_SYSTEM_PROMPT = """\
+You write multiple-choice questions from a student's own notes, so they can \
+test themselves on what they actually studied.
+
+1. Every question must be answerable from the notes alone. Do not use anything \
+you know from elsewhere, and do not write a question the notes do not answer.
+2. Give exactly four options. Exactly one is correct.
+3. The three wrong options must be plausible — the same kind of thing as the \
+right answer, and wrong for a reason a student could work out. Never pad with \
+options that are obviously silly; a question anybody can guess teaches nothing.
+4. Say which page each question came from. Use the page numbers shown in the \
+notes, and only those.
+5. Ask about what the notes explain, not about how they are laid out. Never \
+write a question about a page number, a heading, an answer key, or how many \
+sections there are.
+6. Vary what you ask about. Do not write four questions about one paragraph \
+while the rest of the notes go untouched.
+
+Reply with JSON only, in exactly this shape, and nothing else:
+
+{"questions": [
+  {"prompt": "...", "options": ["...", "...", "...", "..."], "correct": 0, "page": 4}
+]}
+
+`correct` is the index of the right option, 0 to 3.
+
+If the notes cannot support the number of questions asked for, return fewer. \
+Never invent material to reach the count.
+"""
+
+
+def _retry_hint(response) -> str:
+    """How long to wait, in words, from whatever the reply is willing to say.
+
+    Groq returns ``retry-after`` (whole seconds) and
+    ``x-ratelimit-reset-tokens`` (like "49.035s") on a 429. Either is far better
+    than guessing, because the guess people write is "in a moment" and the true
+    answer is often most of a minute — long enough that retrying straight away
+    fails again and the feature looks broken rather than busy.
+
+    Falls back to "a minute" when neither header is there or either is
+    unreadable. A slightly pessimistic number is a much better failure than an
+    exception thrown while building an error message.
+    """
+    raw = response.headers.get("retry-after") or response.headers.get(
+        "x-ratelimit-reset-tokens", ""
+    )
+
+    try:
+        seconds = float(str(raw).rstrip("s"))
+    except (TypeError, ValueError):
+        return "a minute"
+
+    if seconds <= 0:
+        return "a moment"
+    if seconds < 60:
+        # Rounded up: telling somebody 49 seconds and having it still fail at 49
+        # is worse than telling them 50 and having it work.
+        return f"about {int(seconds) + 1} seconds"
+
+    return "a minute"
+
+
+class QuizUnavailable(RuntimeError):
+    """We could not get a usable quiz — no key, no network, or an unusable reply.
+
+    Its own type for the same reason ``llm.AnswerUnavailable``,
+    ``ocr.OcrUnavailable`` and ``embeddings.EmbeddingUnavailable`` have one: so
+    the route can catch exactly this and turn it into one plain sentence.
+
+    **"Unusable" covers more here than in llm.py**, and deliberately. There, a
+    reply we could read was a success. Here a reply we can read but cannot trust
+    — three options instead of four, a `correct` of 7, a page that is not in the
+    note — is also this exception, because storing it would put a broken
+    question in front of a class.
+    """
+
+
+def build_prompt(chunks: list[dict]) -> str:
+    """Format as much of the note as fits into the model's context budget.
+
+    ``chunks`` is what the route reads out of the database: dicts with
+    ``filename``, ``page`` and ``content``, in reading order.
+
+    **This reuses ``llm.build_context`` rather than formatting chunks a second
+    time.** Those page labels are the entire reason a question can name the page
+    it came from, exactly as they are the reason an answer can cite one — and
+    two functions that both have to produce ``[file - p.4]`` is one of them
+    quietly drifting later.
+
+    Unlike ``/ask`` there is no query to retrieve against: "write five questions
+    about this chapter" has no question to match chunks to. So a budget decides
+    how much of the note goes in — and **which** part is the interesting bit.
+
+    **It takes an even spread across the whole note, not the first N characters.**
+    Taking the front was the first version and it was measurably bad: on an
+    11-page note the budget covered pages 1 to 3, so every question in a quiz
+    about the chapter came from its first quarter, and pages 4 to 11 could not
+    be asked about at all. A student would revise the beginning of everything
+    and the end of nothing.
+
+    Spreading costs exactly the same number of tokens and covers the whole
+    document. When the note fits, all of it goes in and the spread does nothing.
+
+    Order is preserved, so the model still reads the note forwards. The gaps
+    between kept pieces are real — this is a sample, not the whole chapter — and
+    that is the honest trade for a budget. Quizzing a chosen section is the
+    proper answer and is a slice of its own.
+    """
+    if not chunks:
+        return ""
+
+    budget = config.QUIZ_MAX_CONTEXT_CHARS
+    total = sum(len(chunk["content"]) for chunk in chunks)
+
+    # It all fits. No sampling, no cleverness, and this is the common case — a
+    # normal chapter is well under the budget.
+    if total <= budget:
+        return llm.build_context(chunks)
+
+    # Roughly how many pieces the budget buys, using the average length rather
+    # than measuring each one. Approximate on purpose: the exact figure is
+    # trimmed below anyway, and an average keeps this one readable line.
+    average = total / len(chunks)
+    room = max(1, int(budget // average))
+
+    # Evenly spaced positions across the whole note, first to last. `step` as a
+    # float and rounded per pick, so the spread stays even instead of drifting
+    # and bunching everything at the front.
+    step = len(chunks) / room
+    picked = [chunks[min(len(chunks) - 1, int(i * step))] for i in range(room)]
+
+    # The average could have been generous, so trim to the real budget.
+    kept: list[dict] = []
+    left = budget
+    for chunk in picked:
+        cost = len(chunk["content"])
+        if kept and cost > left:
+            break
+        kept.append(chunk)
+        left -= cost
+
+    return llm.build_context(kept)
+
+
+def make_questions(context: str, count: int, pages: set[int]) -> list[dict]:
+    """Ask for ``count`` questions about ``context``, and return only valid ones.
+
+    ``pages`` is every page number that really exists in the note. It is passed
+    in rather than parsed back out of ``context`` because the route already knows
+    it, and because a question citing a page the note does not have is one of the
+    things worth refusing.
+
+    Returns a list of ``{"prompt", "options", "correct", "page"}``, already
+    checked. Raises ``QuizUnavailable`` if the model could not be reached, or if
+    nothing usable came back.
+
+    Fewer than ``count`` is a valid result — the note may not support that many,
+    and the prompt asks for fewer rather than invented ones. Zero is not: that is
+    a failure that would otherwise look like an empty quiz.
+    """
+    if not config.GROQ_API_KEY:
+        raise QuizUnavailable(
+            "No GROQ_API_KEY is set, so Nibble cannot write questions. Get a free key "
+            "at https://console.groq.com/keys and put it in backend/.env"
+        )
+
+    # Ask, and ask again if Groq rejects the model's own JSON.
+    #
+    # `response_format` makes Groq validate the reply before sending it, and now
+    # and then the model writes something that does not pass. That arrives as a
+    # 400 with the code `json_validate_failed`, and it is intermittent — the
+    # same note and count succeed on the next attempt. It was reaching people as
+    # "The question writer answered with 400.", which is both useless and wrong
+    # about whose problem it is.
+    #
+    # Only that one code is retried. Every other 400 means the request itself is
+    # wrong, which is our bug, and sending it three times makes it neither
+    # righter nor easier to find.
+    for attempt in range(config.QUIZ_RETRY_ATTEMPTS):
+        response = _ask(context, count)
+
+        if not (response.status_code == 400 and _is_json_validate_failure(response)):
+            break
+
+        if attempt == config.QUIZ_RETRY_ATTEMPTS - 1:
+            raise QuizUnavailable(
+                "Nibble's questions came out garbled a few times in a row. Try again."
+            )
+
+    if response.status_code == 429:
+        # The same split as llm.py and ocr.py: "too fast just now" and "nothing
+        # left today" need different advice, and somebody is waiting on this.
+        body = response.text.lower()
+        if "per day" in body or "rpd" in body:
+            raise QuizUnavailable(
+                "Nibble has written as many questions as it can today. Try again tomorrow."
+            )
+
+        # Groq says exactly when the budget comes back, and we were throwing it
+        # away and guessing "in a moment" instead. "In a moment" is the wrong
+        # advice when the honest answer is fifty seconds — somebody retries
+        # immediately, fails again, and concludes the feature is broken.
+        raise QuizUnavailable(
+            "Nibble has used up its allowance for the minute. "
+            f"Try again in {_retry_hint(response)}."
+        )
+
+    if not response.ok:
+        raise QuizUnavailable(f"The question writer answered with {response.status_code}.")
+
+    try:
+        raw = response.json()["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, ValueError) as exc:
+        raise QuizUnavailable("The question writer sent back something unexpected.") from exc
+
+    questions = _validate(raw, pages)
+
+    if not questions:
+        raise QuizUnavailable(
+            "Nibble read that note but could not write questions from it. "
+            "It may be too short, or mostly pictures."
+        )
+
+    return questions[:count]
+
+
+def _is_json_validate_failure(response) -> bool:
+    """Is this the intermittent "the model's JSON did not pass" 400?
+
+    Checked by error code rather than by matching the message text, because the
+    message is prose Groq is free to reword and the code is the part they
+    promise. Falls back to the raw body if the reply is not JSON at all — a 400
+    with no readable body is not something to retry blindly.
+    """
+    try:
+        return response.json().get("error", {}).get("code") == "json_validate_failed"
+    except ValueError:
+        return False
+
+
+def _ask(context: str, count: int):
+    """One attempt at asking for a quiz. Returns the raw response, good or bad.
+
+    Split out so the retry above reads as a loop over attempts rather than a
+    loop wrapped around forty lines of request body.
+    """
+    try:
+        return requests.post(
+            f"{config.GROQ_BASE_URL}/chat/completions",
+            headers={"Authorization": f"Bearer {config.GROQ_API_KEY}"},
+            json={
+                "model": config.CHAT_MODEL,
+                "messages": [
+                    {"role": "system", "content": QUIZ_SYSTEM_PROMPT},
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Here are my notes:\n\n{context}\n\n"
+                            f"Write {count} multiple-choice questions from them."
+                        ),
+                    },
+                ],
+                # Asking the API itself to guarantee JSON, rather than hoping the
+                # prompt is obeyed. It removes the most common failure — a model
+                # wrapping perfectly good JSON in ```json fences or a sentence of
+                # preamble — without removing the need for the validator below,
+                # which is about the SHAPE being right, not the syntax.
+                "response_format": {"type": "json_object"},
+                # Lower than llm.py's 0.2. A quiz has no voice to get right, and
+                # the variation that makes an answer read naturally makes a
+                # question's distractors wander.
+                "temperature": 0.1,
+                "max_tokens": config.QUIZ_MAX_OUTPUT_TOKENS,
+                "reasoning_effort": config.QUIZ_REASONING_EFFORT,
+            },
+            timeout=_TIMEOUT_SECONDS,
+        )
+    except requests.RequestException as exc:
+        raise QuizUnavailable(f"Could not reach the question writer: {exc}") from exc
+
+
+def _validate(raw: str, pages: set[int]) -> list[dict]:
+    """Turn the model's JSON into questions we are willing to store.
+
+    **A bad question is dropped, not repaired.** There is no sensible way to
+    guess what a model meant by ``correct: 7``, and a guess would put a question
+    with the wrong answer key in front of a class — which is worse than one
+    fewer question, because nothing about it looks wrong.
+
+    A reply where *every* question is bad ends up as an empty list, which
+    ``make_questions`` turns into ``QuizUnavailable``. So "the model ignored the
+    format entirely" and "the model wrote nothing usable" arrive at the same
+    place, which is the same sentence to whoever is waiting.
+    """
+    try:
+        payload = json.loads(raw)
+    except ValueError as exc:
+        raise QuizUnavailable("The question writer did not send back usable questions.") from exc
+
+    # A dict with "questions" is what was asked for. A bare list is the obvious
+    # near-miss and costs one line to accept, so it is accepted.
+    if isinstance(payload, dict):
+        candidates = payload.get("questions")
+    elif isinstance(payload, list):
+        candidates = payload
+    else:
+        candidates = None
+
+    if not isinstance(candidates, list):
+        raise QuizUnavailable("The question writer did not send back usable questions.")
+
+    valid: list[dict] = []
+
+    for item in candidates:
+        question = _validate_one(item, pages)
+        if question is not None:
+            valid.append(question)
+
+    return valid
+
+
+def _validate_one(item: object, pages: set[int]) -> dict | None:
+    """Check one question. Returns it cleaned up, or None if it cannot be used.
+
+    Every rule here maps to something that would otherwise reach a student:
+
+    - not four options, or an out-of-range ``correct``: the quiz marks every
+      answer wrong and looks fine doing it
+    - a blank prompt or option: an unanswerable question
+    - duplicate options: two identical buttons where only one of them scores
+    - a page the note does not have: the "check it against the page" promise
+      breaks, and that promise is why anybody trusts this
+    """
+    if not isinstance(item, dict):
+        return None
+
+    prompt = item.get("prompt")
+    options = item.get("options")
+    correct = item.get("correct")
+    page = item.get("page")
+
+    if not isinstance(prompt, str) or not prompt.strip():
+        return None
+
+    if not isinstance(options, list) or len(options) != OPTION_COUNT:
+        return None
+
+    if not all(isinstance(option, str) and option.strip() for option in options):
+        return None
+
+    cleaned = [option.strip() for option in options]
+
+    # Two identical options means one right answer and one that looks identical
+    # and scores zero. Unanswerable, and infuriating in a way that reads as the
+    # app being broken rather than the question being bad.
+    if len(set(cleaned)) != OPTION_COUNT:
+        return None
+
+    # `bool` is a subclass of `int` in Python, so True would otherwise sail
+    # through as the index 1. Worth one clause: a model that answers `correct:
+    # true` is exactly the almost-right reply this validator exists for.
+    if isinstance(correct, bool) or not isinstance(correct, int):
+        return None
+
+    if not 0 <= correct < OPTION_COUNT:
+        return None
+
+    if isinstance(page, bool) or not isinstance(page, int) or page not in pages:
+        return None
+
+    return {
+        "prompt": prompt.strip(),
+        "options": cleaned,
+        "correct": correct,
+        "page": page,
+    }

@@ -1,0 +1,450 @@
+"""Tests for quiz.py — the prompt, and every way a reply can be unusable.
+
+**Nothing here calls Groq**, for the reasons at the top of test_llm.py.
+
+Most of this file is about the validator, and that weighting is deliberate.
+``llm.answer`` produces a sentence a person reads and judges. A quiz is not read,
+it is *used*: the browser marks answers against ``correct`` with nobody checking
+it first. So a reply that is nearly right is worse here than one that fails
+outright — a question with four options and ``correct: 4`` marks every answer
+wrong, for one person practising or a whole class at once, and nothing on screen
+looks broken.
+
+Every rejection below is one of those.
+"""
+
+import json
+
+import pytest
+import requests
+
+from app import config, quiz
+
+PAGES = {1, 2, 3}
+
+
+def _question(**overrides):
+    """A valid question, with whatever is being tested swapped in."""
+    question = {
+        "prompt": "What moves water across a membrane?",
+        "options": ["Osmosis", "Mitosis", "Respiration", "Diffusion"],
+        "correct": 0,
+        "page": 1,
+    }
+    question.update(overrides)
+    return question
+
+
+class _FakeResponse:
+    def __init__(self, status_code=200, payload=None, text=""):
+        self.status_code = status_code
+        self.ok = 200 <= status_code < 300
+        self.text = text
+        self.headers = {}
+        self._payload = payload
+
+    def json(self):
+        if self._payload is None:
+            raise ValueError("no JSON in this response")
+        return self._payload
+
+
+def _reply(questions):
+    """A successful Groq reply carrying these questions."""
+    content = json.dumps({"questions": questions})
+    return _FakeResponse(payload={"choices": [{"message": {"content": content}}]})
+
+
+def _raw_reply(content: str):
+    """A successful Groq reply carrying this exact string."""
+    return _FakeResponse(payload={"choices": [{"message": {"content": content}}]})
+
+
+@pytest.fixture(autouse=True)
+def _a_key_exists(monkeypatch):
+    """Most tests are not about the missing-key path, so give them a key."""
+    monkeypatch.setattr(config, "GROQ_API_KEY", "test-key")
+
+
+def _capture(monkeypatch, response=None):
+    sent = {}
+
+    def fake_post(url, **kwargs):
+        sent["url"] = url
+        sent.update(kwargs)
+        return response if response is not None else _reply([_question()])
+
+    monkeypatch.setattr(quiz.requests, "post", fake_post)
+    return sent
+
+
+# ---------------------------------------------------------------------------
+# build_prompt — the note, as much of it as fits
+# ---------------------------------------------------------------------------
+
+
+def test_build_prompt_reuses_the_same_page_labels_as_ask():
+    """Those labels are why a question can name its page. One source, not two."""
+    chunks = [{"filename": "bio.pdf", "page": 4, "content": "Osmosis is..."}]
+
+    assert "[bio.pdf - p.4]" in quiz.build_prompt(chunks)
+
+
+def test_build_prompt_stops_at_the_context_budget(monkeypatch):
+    monkeypatch.setattr(config, "QUIZ_MAX_CONTEXT_CHARS", 100)
+    chunks = [{"filename": "bio.pdf", "page": page, "content": "x" * 80} for page in range(1, 6)]
+
+    built = quiz.build_prompt(chunks)
+
+    assert "p.1" in built
+    assert "p.5" not in built
+
+
+def test_build_prompt_spreads_across_the_whole_note(monkeypatch):
+    """The first version took the front, and that was measurably bad.
+
+    On an 11-page note the budget covered pages 1-3, so every question came from
+    the first quarter and pages 4-11 could not be asked about at all. Spreading
+    costs exactly the same tokens and covers the document.
+    """
+    monkeypatch.setattr(config, "QUIZ_MAX_CONTEXT_CHARS", 300)
+    chunks = [{"filename": "bio.pdf", "page": page, "content": "x" * 100} for page in range(1, 11)]
+
+    built = quiz.build_prompt(chunks)
+    pages = sorted(
+        int(line.split("p.")[1].rstrip("]")) for line in built.splitlines() if line.startswith("[")
+    )
+
+    assert len(pages) == 3, f"budget buys three pieces, got {pages}"
+    # Reaches the back of the note rather than stopping at the front.
+    assert max(pages) > 5, f"never got past the beginning: {pages}"
+    assert pages == sorted(pages), "reading order must be preserved"
+
+
+def test_build_prompt_sends_everything_when_it_fits(monkeypatch):
+    """The common case. A normal chapter is well under the budget."""
+    monkeypatch.setattr(config, "QUIZ_MAX_CONTEXT_CHARS", 10_000)
+    chunks = [{"filename": "bio.pdf", "page": page, "content": "x" * 100} for page in range(1, 6)]
+
+    built = quiz.build_prompt(chunks)
+
+    assert all(f"p.{page}]" in built for page in range(1, 6))
+
+
+def test_build_prompt_never_exceeds_the_budget(monkeypatch):
+    monkeypatch.setattr(config, "QUIZ_MAX_CONTEXT_CHARS", 500)
+    chunks = [{"filename": "bio.pdf", "page": page, "content": "x" * 100} for page in range(1, 21)]
+
+    body = sum(
+        len(line) for line in quiz.build_prompt(chunks).splitlines() if not line.startswith("[")
+    )
+
+    assert body <= 500
+
+
+def test_build_prompt_of_nothing_is_empty():
+    assert quiz.build_prompt([]) == ""
+
+
+def test_build_prompt_keeps_one_chunk_even_if_it_blows_the_budget(monkeypatch):
+    """A note whose first piece is over budget should still make a quiz."""
+    monkeypatch.setattr(config, "QUIZ_MAX_CONTEXT_CHARS", 10)
+    chunks = [{"filename": "bio.pdf", "page": 1, "content": "x" * 900}]
+
+    assert "p.1" in quiz.build_prompt(chunks)
+
+
+# ---------------------------------------------------------------------------
+# The happy path
+# ---------------------------------------------------------------------------
+
+
+def test_valid_questions_come_back(monkeypatch):
+    _capture(monkeypatch, _reply([_question(), _question(prompt="And another?")]))
+
+    questions = quiz.make_questions("notes", 2, PAGES)
+
+    assert len(questions) == 2
+    assert questions[0]["prompt"] == "What moves water across a membrane?"
+    assert questions[0]["correct"] == 0
+
+
+def test_never_more_than_asked_for(monkeypatch):
+    """A model that ignores the count must not produce a longer quiz."""
+    _capture(monkeypatch, _reply([_question() for _ in range(9)]))
+
+    assert len(quiz.make_questions("notes", 3, PAGES)) == 3
+
+
+def test_fewer_than_asked_for_is_a_valid_result(monkeypatch):
+    """A short note supports fewer questions. Better than invented ones."""
+    _capture(monkeypatch, _reply([_question()]))
+
+    assert len(quiz.make_questions("notes", 5, PAGES)) == 1
+
+
+def test_a_bare_list_is_accepted(monkeypatch):
+    """The obvious near-miss, and one line to accept."""
+    content = json.dumps([_question()])
+    _capture(monkeypatch, _raw_reply(content))
+
+    assert len(quiz.make_questions("notes", 1, PAGES)) == 1
+
+
+def test_the_configured_model_and_limits_are_used(monkeypatch):
+    sent = _capture(monkeypatch)
+
+    quiz.make_questions("notes", 5, PAGES)
+
+    assert sent["json"]["model"] == config.CHAT_MODEL
+    assert sent["json"]["max_tokens"] == config.QUIZ_MAX_OUTPUT_TOKENS
+    assert sent["json"]["reasoning_effort"] == config.QUIZ_REASONING_EFFORT
+    assert sent["json"]["response_format"] == {"type": "json_object"}
+
+
+# ---------------------------------------------------------------------------
+# The validator — a bad question is dropped, never repaired
+# ---------------------------------------------------------------------------
+#
+# There is no sensible way to guess what a model meant by `correct: 7`, and a
+# guess would put a wrong answer key in front of a class — worse than one fewer
+# question, because nothing about it looks wrong.
+
+
+@pytest.mark.parametrize(
+    "bad, why",
+    [
+        ({"options": ["A", "B", "C"]}, "three options"),
+        ({"options": ["A", "B", "C", "D", "E"]}, "five options"),
+        ({"correct": 4}, "correct past the end — marks everything wrong"),
+        ({"correct": -1}, "negative index"),
+        ({"correct": "Osmosis"}, "the text instead of the position"),
+        ({"correct": True}, "a bool, which is an int in Python"),
+        ({"prompt": "   "}, "nothing actually asked"),
+        ({"options": ["A", "", "C", "D"]}, "a blank option"),
+        ({"options": ["A", "A", "C", "D"]}, "two identical options"),
+        ({"page": 99}, "a page the note does not have"),
+        ({"page": "4"}, "a page as a string"),
+        ({"page": True}, "a page as a bool"),
+    ],
+)
+def test_an_unusable_question_is_dropped(monkeypatch, bad, why):
+    _capture(monkeypatch, _reply([_question(), _question(**bad)]))
+
+    questions = quiz.make_questions("notes", 5, PAGES)
+
+    assert len(questions) == 1, f"should have dropped the one with {why}"
+
+
+def test_a_question_that_is_not_even_a_dict_is_dropped(monkeypatch):
+    _capture(monkeypatch, _raw_reply(json.dumps({"questions": [_question(), "nonsense"]})))
+
+    assert len(quiz.make_questions("notes", 5, PAGES)) == 1
+
+
+def test_every_question_being_unusable_is_a_failure_not_an_empty_quiz(monkeypatch):
+    """An empty quiz is a non-result that would sit in the list looking takeable."""
+    _capture(monkeypatch, _reply([_question(correct=9), _question(page=99)]))
+
+    with pytest.raises(quiz.QuizUnavailable, match="could not write questions"):
+        quiz.make_questions("notes", 5, PAGES)
+
+
+def test_a_reply_that_is_not_json_is_a_sentence(monkeypatch):
+    _capture(monkeypatch, _raw_reply("Here are your questions!"))
+
+    with pytest.raises(quiz.QuizUnavailable, match="usable questions"):
+        quiz.make_questions("notes", 5, PAGES)
+
+
+def test_json_of_the_wrong_shape_is_a_sentence(monkeypatch):
+    _capture(monkeypatch, _raw_reply(json.dumps({"questions": "not a list"})))
+
+    with pytest.raises(quiz.QuizUnavailable, match="usable questions"):
+        quiz.make_questions("notes", 5, PAGES)
+
+
+def test_options_are_stripped_not_just_accepted(monkeypatch):
+    _capture(monkeypatch, _reply([_question(options=[" A ", "B", "C", "D"])]))
+
+    assert quiz.make_questions("notes", 1, PAGES)[0]["options"][0] == "A"
+
+
+# ---------------------------------------------------------------------------
+# When something goes wrong, a person gets a sentence
+# ---------------------------------------------------------------------------
+
+
+def test_no_api_key_says_where_to_get_one(monkeypatch):
+    monkeypatch.setattr(config, "GROQ_API_KEY", "")
+
+    with pytest.raises(quiz.QuizUnavailable, match="console.groq.com"):
+        quiz.make_questions("notes", 5, PAGES)
+
+
+def test_no_key_means_no_request_is_made_at_all(monkeypatch):
+    monkeypatch.setattr(config, "GROQ_API_KEY", "")
+
+    def explode(*args, **kwargs):
+        raise AssertionError("called Groq with no key")
+
+    monkeypatch.setattr(quiz.requests, "post", explode)
+
+    with pytest.raises(quiz.QuizUnavailable):
+        quiz.make_questions("notes", 5, PAGES)
+
+
+def test_the_network_being_down_is_a_sentence_not_a_traceback(monkeypatch):
+    def boom(*args, **kwargs):
+        raise requests.ConnectionError("no route to host")
+
+    monkeypatch.setattr(quiz.requests, "post", boom)
+
+    with pytest.raises(quiz.QuizUnavailable, match="Could not reach"):
+        quiz.make_questions("notes", 5, PAGES)
+
+
+def test_being_asked_too_fast_says_how_long_to_wait(monkeypatch):
+    """Groq says when the budget returns. Guessing "a moment" when the honest
+    answer is most of a minute makes people retry, fail, and give up."""
+    response = _FakeResponse(status_code=429, text="rate limit")
+    response.headers = {"x-ratelimit-reset-tokens": "49.035s"}
+    _capture(monkeypatch, response)
+
+    with pytest.raises(quiz.QuizUnavailable, match="about 50 seconds"):
+        quiz.make_questions("notes", 5, PAGES)
+
+
+def test_retry_after_is_used_when_it_is_there(monkeypatch):
+    response = _FakeResponse(status_code=429, text="rate limit")
+    response.headers = {"retry-after": "12"}
+    _capture(monkeypatch, response)
+
+    with pytest.raises(quiz.QuizUnavailable, match="about 13 seconds"):
+        quiz.make_questions("notes", 5, PAGES)
+
+
+def test_an_unreadable_wait_still_gives_a_sentence(monkeypatch):
+    """Never throw while building an error message."""
+    response = _FakeResponse(status_code=429, text="rate limit")
+    response.headers = {"retry-after": "soon-ish"}
+    _capture(monkeypatch, response)
+
+    with pytest.raises(quiz.QuizUnavailable, match="a minute"):
+        quiz.make_questions("notes", 5, PAGES)
+
+
+def test_no_rate_limit_headers_at_all_still_gives_a_sentence(monkeypatch):
+    _capture(monkeypatch, _FakeResponse(status_code=429, text="rate limit"))
+
+    with pytest.raises(quiz.QuizUnavailable, match="a minute"):
+        quiz.make_questions("notes", 5, PAGES)
+
+
+def test_running_out_for_the_day_says_tomorrow(monkeypatch):
+    _capture(monkeypatch, _FakeResponse(status_code=429, text="limit per day exceeded"))
+
+    with pytest.raises(quiz.QuizUnavailable, match="tomorrow"):
+        quiz.make_questions("notes", 5, PAGES)
+
+
+def test_a_server_error_does_not_leak_the_providers_own_words(monkeypatch):
+    _capture(monkeypatch, _FakeResponse(status_code=500, text="upstream billing failure"))
+
+    with pytest.raises(quiz.QuizUnavailable) as caught:
+        quiz.make_questions("notes", 5, PAGES)
+
+    assert "billing" not in str(caught.value)
+
+
+# ---------------------------------------------------------------------------
+# Groq rejecting the model's own JSON
+# ---------------------------------------------------------------------------
+#
+# response_format makes Groq validate the reply before sending it, and now and
+# then the model writes something that does not pass. It arrives as a 400 with
+# the code json_validate_failed, and it is INTERMITTENT — the same note and
+# count succeed on the next attempt. It was reaching people as "The question
+# writer answered with 400.", which is useless and wrong about whose problem it
+# is.
+
+
+def _json_invalid():
+    return _FakeResponse(
+        status_code=400,
+        payload={"error": {"code": "json_validate_failed", "message": "Failed to validate JSON."}},
+    )
+
+
+def _sequence(monkeypatch, responses):
+    """Answer with each response in turn, and count the attempts."""
+    calls = {"n": 0}
+
+    def fake_post(url, **kwargs):
+        response = responses[min(calls["n"], len(responses) - 1)]
+        calls["n"] += 1
+        return response
+
+    monkeypatch.setattr(quiz.requests, "post", fake_post)
+    return calls
+
+
+def test_a_rejected_json_reply_is_asked_again(monkeypatch):
+    calls = _sequence(monkeypatch, [_json_invalid(), _reply([_question()])])
+
+    questions = quiz.make_questions("notes", 1, PAGES)
+
+    assert calls["n"] == 2
+    assert len(questions) == 1
+
+
+def test_it_gives_up_after_the_configured_attempts(monkeypatch):
+    calls = _sequence(monkeypatch, [_json_invalid()])
+
+    with pytest.raises(quiz.QuizUnavailable, match="garbled"):
+        quiz.make_questions("notes", 5, PAGES)
+
+    assert calls["n"] == config.QUIZ_RETRY_ATTEMPTS
+
+
+def test_the_giving_up_message_never_mentions_a_400(monkeypatch):
+    """ "The question writer answered with 400" is not something to act on."""
+    _sequence(monkeypatch, [_json_invalid()])
+
+    with pytest.raises(quiz.QuizUnavailable) as caught:
+        quiz.make_questions("notes", 5, PAGES)
+
+    assert "400" not in str(caught.value)
+
+
+def test_any_other_400_is_not_retried(monkeypatch):
+    """A different 400 means our request is wrong. Sending it again is noise."""
+    other = _FakeResponse(
+        status_code=400,
+        payload={"error": {"code": "model_not_found", "message": "no such model"}},
+    )
+    calls = _sequence(monkeypatch, [other])
+
+    with pytest.raises(quiz.QuizUnavailable):
+        quiz.make_questions("notes", 5, PAGES)
+
+    assert calls["n"] == 1
+
+
+def test_a_400_with_no_readable_body_is_not_retried(monkeypatch):
+    calls = _sequence(monkeypatch, [_FakeResponse(status_code=400, text="gateway nonsense")])
+
+    with pytest.raises(quiz.QuizUnavailable):
+        quiz.make_questions("notes", 5, PAGES)
+
+    assert calls["n"] == 1
+
+
+def test_a_rate_limit_is_not_retried_here(monkeypatch):
+    """Somebody is waiting. A wait long enough to help looks like a hang."""
+    calls = _sequence(monkeypatch, [_FakeResponse(status_code=429, text="rate limit")])
+
+    with pytest.raises(quiz.QuizUnavailable):
+        quiz.make_questions("notes", 5, PAGES)
+
+    assert calls["n"] == 1

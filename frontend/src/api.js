@@ -125,7 +125,15 @@ async function request(path, options = {}) {
       // Not every failure has a JSON body — a crashed server sends none at all.
       detail = null
     }
-    throw new Error(messageFor(response.status, detail))
+    // The status is attached as well as the sentence, because slice 6 has two
+    // failures that need telling apart by a caller rather than by a person: a
+    // 422 from POST /quizzes means "this note is too old to quiz, delete and
+    // re-upload it", which deserves a different offer than a 503 meaning "try
+    // again in a moment". Matching on the text of a message to work that out is
+    // the habit this avoids — it breaks the moment somebody improves a word.
+    const error = new Error(messageFor(response.status, detail))
+    error.status = response.status
+    throw error
   }
 
   // 204 means "done, nothing to send back" — there is no JSON to read.
@@ -268,4 +276,73 @@ export function ask(question, history = []) {
       history: history.map(({ role, content }) => ({ role, content })),
     }),
   })
+}
+
+/**
+ * Slice 6: write a quiz from one of your notes.
+ *
+ * This calls the language model, so it takes a few seconds — show something
+ * while it runs. Returns the quiz with its questions, including `correct`.
+ *
+ * `count` is optional and the backend defaults it. It has to be between 1 and
+ * 10; the ceiling is Groq's free tier, not a preference.
+ */
+export function createQuiz(documentId, title, count) {
+  return request('/quizzes', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ document_id: documentId, title, ...(count ? { count } : {}) }),
+  })
+}
+
+/**
+ * Slice 6: every quiz you own, newest first.
+ *
+ * No questions in these rows — this is the list you pick from, and it carries
+ * `question_count` instead. Call getQuiz for the questions themselves.
+ */
+export function listQuizzes() {
+  return request('/quizzes')
+}
+
+/**
+ * Slice 6: one quiz and all its questions, in order, with the answers.
+ *
+ * **`correct` is included, and that is the point.** It is your quiz, made from
+ * your notes, so the browser holds the answer key and marks as you go. That is
+ * why practising alone needs no other route and stores nothing: the score lives
+ * on screen and closing the tab ends it.
+ */
+export function getQuiz(id) {
+  return request(`/quizzes/${id}`)
+}
+
+/**
+ * Slice 6: fix a question the model got wrong. Send only what changed.
+ *
+ * **Sending `options` requires sending `correct` too, and the backend refuses
+ * without it.** `correct` is a position in `options`, not the text of the right
+ * answer — so replacing the list without restating which entry is right leaves
+ * the key pointing at whatever now sits in that slot. The quiz still renders,
+ * still marks, and marks the wrong thing.
+ *
+ * `correct` on its own is fine: changing which entry is right does not disturb
+ * the list it points into.
+ */
+export function updateQuestion(quizId, questionId, changes) {
+  return request(`/quizzes/${quizId}/questions/${questionId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(changes),
+  })
+}
+
+/** Slice 6: drop a question that came out wrong. Refused for the last one. */
+export function deleteQuestion(quizId, questionId) {
+  return request(`/quizzes/${quizId}/questions/${questionId}`, { method: 'DELETE' })
+}
+
+/** Slice 6: delete a quiz and its questions. */
+export function deleteQuiz(id) {
+  return request(`/quizzes/${id}`, { method: 'DELETE' })
 }

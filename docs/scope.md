@@ -66,7 +66,7 @@ already closed.
 | 4.5 | On the internet       | — (unplanned)             | done, merged, deployed  |
 | 4.6 | What real use broke   | — (unplanned)             | built, not yet merged   |
 | 5   | Make it Nibble        | Slice 5 — Make it Nibble  | paused — now last       |
-| 6   | Quiz yourself         | Slice 6 — Quiz yourself   | next                    |
+| 6   | Quiz yourself         | Slice 6 — Quiz yourself   | built, not yet merged   |
 | 7   | The classroom         | Slice 7 — The classroom   | open                    |
 | 8   | Marking               | Slice 8 — Marking         | open                    |
 
@@ -2222,21 +2222,321 @@ a key already shared with reading handwriting and with `/ask`.
 
 ### Checklist
 
-- [ ] `adr/0004-teacher-is-an-owner.md` — why a teacher is an owner
-- [ ] `api.md` — the six quiz routes, **written before either side starts**
-- [ ] `db.py` — `quizzes` and `questions`
-- [ ] `config.py` — `QUIZ_QUESTION_COUNT`, `QUIZ_MAX_QUESTIONS`,
+- [x] `adr/0004-teacher-is-an-owner.md` — why a teacher is an owner. **This was
+      already written and the box was never ticked**; the drift is corrected here
+      rather than silently, as the rules at the top of this file ask.
+- [x] `api.md` — the six quiz routes. Also already written, also never ticked.
+- [x] `db.py` — `quizzes` and `questions`
+- [x] `config.py` — `QUIZ_QUESTION_COUNT`, `QUIZ_MAX_QUESTIONS`,
       `QUIZ_MAX_OUTPUT_TOKENS`, `QUIZ_MAX_CONTEXT_CHARS`, `QUIZ_REASONING_EFFORT`
-- [ ] `quiz.py` — `QUIZ_SYSTEM_PROMPT`, `QuizUnavailable`, `make_questions()`, and
+- [x] `quiz.py` — `QUIZ_SYSTEM_PROMPT`, `QuizUnavailable`, `make_questions()`, and
       the validator. Reuses `llm.build_context()` rather than formatting chunks a
       second time — the lesson #16 already taught
-- [ ] `routes.py` — `POST`/`GET` `/quizzes`, `GET /quizzes/{id}`, `PATCH` and
-      `DELETE` on a question, `DELETE /quizzes/{id}` _(Fahim, scaffolded)_
-- [ ] `App.jsx` — the "Quiz me" card: pick a note, generate, edit a question,
-      practise, see your score _(Arman, scaffolded)_
-- [ ] `api.js` — one function per route, and `error.status` attached in `request()`
-- [ ] `tests/test_quiz.py`, quiz-route tests, and every new route added to
-      `PROTECTED` in `test_auth.py`
+- [x] `routes.py` — `POST`/`GET` `/quizzes`, `GET /quizzes/{id}`, `PATCH` and
+      `DELETE` on a question, `DELETE /quizzes/{id}` _(Fahim's file — **built,
+      not scaffolded**; see below)_
+- [x] `QuizMe.jsx` — the "Quiz me" card: pick a note, generate, edit a question,
+      practise, see your score _(Arman's area — **built, not scaffolded**)_
+- [x] `api.js` — one function per route, and `error.status` attached in `request()`
+- [x] `tests/test_quiz.py` (31), `tests/test_quiz_routes.py` (36), and all six new
+      routes added to `PROTECTED` in `test_auth.py`. **245 backend tests pass.**
+
+### Two departures, both deliberate, both recorded rather than hidden
+
+**The scaffold rule was overridden, on the tech lead's instruction.** CLAUDE.md
+says anything assigned to somebody else is scaffolded with `TODO(name)`, so that
+whoever owns it comes out able to explain it. #22 is Fahim's and #23 is Arman's,
+and both were **built in full** instead, to get slice 6 finished quickly.
+
+The cost is the one CLAUDE.md names, and it is worth writing down so nobody is
+surprised by it at review: the pull-request gate is *explain this change in your
+own words*, and for these two files there is now nothing either of them built to
+explain. Either they read it and take it on before the PR, or the gate has to be
+waived for this slice. That is a people decision, not a code one.
+
+**The quiz card is its own file, not part of `App.jsx`.** The checklist above
+said `App.jsx`. It is `components/QuizMe.jsx` instead, because `App.jsx` was
+already past a thousand lines and another three hundred would have made the one
+file nobody wants to open. Same pattern as `Landing.jsx`, so it is not a new
+idea — but it is a change to the plan, so the plan is corrected here rather than
+quietly diverged from.
+
+### Checked against real Groq, 2026-09-09
+
+Generation was run for real against the 31-page database chapter, not just
+faked in tests. Five questions came back, all five validated, every page real:
+
+> **According to the notes, which problem is NOT listed as a reason for using a
+> database system?** (p.6) — A. Data redundancy and inconsistency · B. Difficulty
+> in accessing data · **C. High processing speed of queries** · D. Security
+> problems
+
+The distractors are the part worth noticing: they are all real items from the
+list on that page, with one plausible non-member. That is what
+`QUIZ_REASONING_EFFORT = "medium"` is buying, and it is why this one setting is
+higher than `/ask`'s — at "low" a model writes one plausible wrong option and two
+throwaways, and the quiz marks itself.
+
+### Three defects found by review, all fixed
+
+**A note deleted mid-generation was a 500.** `create_quiz` checks the note, then
+closes the connection and spends several seconds calling the model, then inserts.
+Another tab deleting that note in the gap made the foreign key refuse the insert,
+and an uncaught `sqlite3.IntegrityError` became a traceback for something
+somebody had done deliberately. Now caught, and answered as a 404 saying the note
+went away while the questions were being written.
+
+Caught rather than re-checked, and that is the interesting half: a second SELECT
+is the same race one line further down, because the note can still go between the
+check and the insert. **The constraint is the only thing that can answer without
+a gap, so the constraint is what gets asked.**
+
+**An edit could make a question the generator would have refused.**
+`quiz._validate_one` rejects duplicate options — two identical buttons where only
+one scores is unanswerable, and reads as a broken app rather than a bad question
+— but `PATCH` did not. The rule to keep: **an edit must never be able to produce
+a question generation would have thrown away.** Anywhere those two sets of rules
+disagree, the looser one is the bug.
+
+**A slow save applied to the wrong quiz.** In `QuizMe.jsx`, saving or deleting a
+question and then leaving before the reply landed spread `open` while it was
+`null` — `{...null}` is `{}`, and reading `.questions` off that throws during
+render. Opening a *different* quiz in that window was worse than a crash: the
+reply was applied to whichever quiz was open, so a question from one appeared in
+another and the change looked saved when it was not. Both handlers now capture
+the id and compare it inside the state updater, which sees the state as it is
+now rather than as it was when the request started.
+
+### The free tier was measured, and two of these settings were guesses
+
+A ten-question quiz came back **"Nibble is being asked a lot at once"**, and
+behind it was a second failure that never reached the screen: a `400` reading
+`json_validate_failed` with an empty `failed_generation`. Both were ours.
+
+**The rate limit was written down wrong.** These settings said "the free tier
+caps OUTPUT at 1,000 tokens per minute", copied across from the OCR settings.
+That figure belongs to the *vision* model and was never checked against the chat
+one. Asking Groq — the headers come back on every reply — the real limit for
+`openai/gpt-oss-120b` is:
+
+    x-ratelimit-limit-tokens: 8000      per minute, INPUT AND OUTPUT TOGETHER
+
+Which changes which number matters. Output was never the expensive part. The
+note we send is: at `QUIZ_MAX_CONTEXT_CHARS = 12_000` one quiz sent about 3,000
+tokens of it, so a single quiz cost roughly half the minute — and `/ask` at
+`TOP_K = 12` spends from the same budget. Now 6,000 characters, about a quarter.
+
+**And `max_tokens` covers reasoning, not just the answer.** Measured, same note,
+same ten questions:
+
+| `reasoning_effort` | reasoning tokens | answer tokens | questions |
+| --- | --- | --- | --- |
+| medium | **893** | 621 | 10 |
+| low | **31** | 615 | 10 |
+
+At medium, reasoning alone was 893 of the 1,000 allowed, so the JSON ran out of
+room part-way through and Groq rejected the incomplete reply. Nothing was wrong
+with the questions — there was no space left to finish writing them.
+
+**`QUIZ_REASONING_EFFORT` was "medium" because a comment asserted it had to be**,
+claiming a model gets lazy about distractors at "low". Plausible, and untested.
+Twenty-nine times the reasoning for the same ten usable questions. Now "low",
+with `QUIZ_MAX_OUTPUT_TOKENS` raised to 2,000 so nothing truncates.
+
+The distractors at "low" were read by hand and are genuine. **The caveat,
+because it flatters the result:** the note checked was itself a multiple-choice
+bank, so the model had real options in front of it. A chapter of prose is the
+harder case, and that is the first knob to turn if distractors come back weak —
+with a measurement next time, not an assertion.
+
+Verified end to end afterwards: ten questions asked for, ten returned, every
+page real.
+
+### Which part of the note goes in, which turned out to matter more than how much
+
+Shrinking the context to fix the 429 had a cost that only showed up when the
+pages were counted: **an 11-page note produced a context covering pages 1, 2 and
+3.** Every question in a quiz about the whole lab came from its first quarter.
+Somebody revising from it would learn the beginning of everything and the end of
+nothing, and nothing on screen would say so.
+
+The cause was that `build_prompt` took the note **from the front** until the
+budget ran out. That was written when the budget was 12,000 characters and
+usually swallowed the whole document, so it was invisible — halving the budget
+made it the dominant behaviour.
+
+Now it takes an **even spread across the whole note**. Identical token cost,
+because the same number of pieces goes in; they are simply drawn from the length
+of the document rather than the start of it. When a note fits inside the budget,
+all of it goes in and the spread does nothing, which is the common case.
+
+Measured on the same 11-page note, same budget:
+
+| | pages reaching the model |
+| --- | --- |
+| from the front | 1, 2, 3 |
+| evenly spread | 1, 2, 3, 4, 5, 6, 8 |
+
+And in a real ten-question quiz, the questions came from pages 1, 2, 3, 4, 6 and
+8 — diode logic, RTL, DTL, the Johnson counter and the zero-crossing detector,
+instead of three questions about experiment 1.
+
+The gaps are real: this is a sample of a long note, not all of it. Quizzing a
+chosen section is still the proper answer, and still a slice rather than a knob.
+
+**A better 429, too.** Groq says exactly when the budget returns, and we were
+discarding it and guessing "in a moment" — the wrong advice when the honest
+answer is fifty seconds, because somebody retries at once, fails, and concludes
+the feature is broken.
+
+### A fourth stale-response bug, from review
+
+`handleOpen` applied its reply unconditionally. Open quiz A, change your mind and
+open B before A loads, and A lands afterwards and replaces B — in B's mode.
+Deleting A while it loaded reopened it; making a new quiz while one loaded got
+replaced by the old one.
+
+Fixed with the same `openRun` counter `searchRun` already uses in App.jsx: every
+action that opens, closes or replaces the open quiz takes the next number, and a
+reply only writes if its number is still current. **That is now three bugs in
+this component from the same root** — a reply landing after the thing it was for
+stopped being what anybody wanted. Worth remembering as a shape rather than
+three separate fixes.
+
+**And then the fix itself was too blunt**, which review caught next. Deleting a
+quiz bumped the counter unconditionally, so deleting quiz B silently cancelled
+an open of quiz A that was still in flight: nothing appeared, and nothing said
+why. A cancellation with no message is worse than the bug it was guarding
+against, because there is nothing to react to.
+
+A delete now cancels a load only when it is *the same quiz* — tracked with an
+`openingId` ref alongside the counter. Deleting one quiz is not an opinion about
+a different one. Making a quiz and pressing "All quizzes" still cancel
+unconditionally, because both of those *are* explicit statements about what
+should be on screen.
+
+The lesson is about the guard rather than the bug: **"ignore stale replies" has
+to mean stale, not merely older.** A counter alone cannot tell those apart when
+several unrelated things share it.
+
+**And then it was wrong a third time**, caught by the same review. The
+cancellation sat *above* the `await`, so it cancelled on the assumption that the
+delete would succeed. When it did not — an expired session, a dropped
+connection, a 500 — the quiz was still there, the open already on its way had
+been thrown away, and the person got an error about deleting plus a screen that
+had quietly refused to navigate. Two failures reported as one.
+
+It now cancels only after the delete has actually succeeded, which still closes
+the original bug: the sole reason to cancel is that the quiz is gone. If the
+open's reply already landed while the delete was in flight, it is on screen and
+the existing `setOpen` line takes it off again.
+
+**Then a fourth round**, because the delete was fixed and the identical flaw was
+left sitting in `handleCreate`. It claimed the run at the top, so a failed
+generation cancelled an open that was still in flight.
+
+That one bites harder than the delete did. **Generating is the request in this
+app most likely to fail** — it calls the model, and a rate limit or a rejected
+reply is an ordinary afternoon on the free tier. Every one of those failures was
+also throwing away a navigation, and reporting only the generation.
+
+Now the run is claimed on success. If something newer was asked for while the
+questions were being written — seconds, easily clicked past — that newer thing
+keeps the screen and the finished quiz just joins the list.
+
+**Four rounds on the same handful of lines**, and the rule that would have
+prevented three of them: *cancel on the outcome, never on the intention.* A
+guard that fires before the thing it is guarding against has happened is wrong
+exactly as often as that thing fails.
+
+Worth auditing by that rule rather than waiting for the next review. Every place
+this component touches `openRun`:
+
+| where | claims on | correct because |
+| --- | --- | --- |
+| `handleCreate` | success | the quiz might not get written |
+| `handleDeleteQuiz` | success | the delete might not go through |
+| `handleOpen` | immediately | navigating cannot fail; its own reply is guarded |
+| "← All quizzes" | immediately | no request at all, so intention *is* outcome |
+
+Only the two with a request that can fail needed the fix, and both now have it.
+
+### The 400 came back, and this time it was intermittent
+
+A quiz on the 31-page database chapter failed with **"The question writer
+answered with 400."** — which is both useless to read and wrong about whose
+problem it is.
+
+Underneath was `json_validate_failed` again, but **not** the truncation fixed
+above. `response_format: json_object` makes Groq validate the reply before
+sending it, and now and then the model writes something that does not pass.
+Reproducing it showed the point: the very next attempt, same note, same count,
+came back `200` using 555 of its 2,000 tokens. Nothing was too big. The model
+simply wrote bad JSON once.
+
+So it is retried, three times, with no wait — the same shape as
+`OCR_RETRY_ATTEMPTS`, minus the pause, because that pause exists for rate limits
+and nothing here improves by waiting while somebody watches a spinner.
+
+**Only that one error code is retried**, checked by code rather than by matching
+message text. Every other 400 means the request itself is wrong, which is our
+bug, and sending it three times makes it neither righter nor easier to find. A
+429 is not retried here either — a wait long enough to help would look like a
+hang.
+
+Checked by running it three times in a row on the chapter that failed: **3/3
+succeeded, ten questions each, drawn from pages 3 to 29 of 31.** That last part
+is the even spread working on prose, which also answers the caveat left above
+about the quality check having been done on a multiple-choice bank.
+
+### Open, deferred on purpose: asking for 10 often gives 5
+
+**Decided 2026-09-09: the demo shows 5 questions and this is not fixed first.**
+Five good questions demo exactly as well as ten, and slice 7 is worth more than
+this is. Written down rather than left as a surprise for whoever hits it next.
+
+The count is a ceiling, not a promise. `make_questions` returns `questions[:count]`,
+so a model that writes five gives five, and the prompt explicitly permits that:
+*"If the notes cannot support the number of questions asked for, return fewer."*
+
+**What is known, and it does not yet add up.** Run directly against the same
+31-page chapter, ten came back three times out of three — pages 3 to 29. Through
+the UI it is five. So the difference is not the note and not the model, which
+leaves the request or the retrieval around it. Worth knowing before guessing:
+
+- The model returning five and meaning it. The likeliest one, and the prompt
+  invites it — a spread sample of a chapter has visible gaps, and "cannot
+  support ten" is a fair reading of it.
+- The validator dropping five. Measurable in one run: compare what the model
+  returned against what `_validate` kept, which the diagnostic under "the free
+  tier was measured" already does.
+- A retry landing on a shorter second answer. The retry added for
+  `json_validate_failed` asks again from scratch, and nothing says the second
+  reply has to be as long as the first.
+
+**Where to start:** log both numbers — returned and kept — for one real UI
+request. That separates the three above in a single run, and none of them should
+be guessed at before it is done.
+
+The fix, if it is the first one, is likely the prompt: "return fewer" is
+permission the model is taking freely, and it was written to prevent invention
+rather than to license a short quiz.
+
+### The stale backend, and why the message was right
+
+The quiz card first came back with *"Nibble's backend doesn't know about that
+yet. It's probably running an older version."* It was — a `uvicorn` started
+without `--reload` the day before, so it had no `/quizzes` routes and returned
+404, which `api.js` reads exactly right.
+
+Worth keeping as the counter-example to the error-message work under Slice 4.6:
+that message cost no time at all, because it named the actual cause and the fix.
+The database one cost real time because a good sentence was thrown away three
+times before it reached anybody.
+
+**Not yet opened in a browser.** The API is proven against real Groq and the card
+is proven by lint and build, which is not the same claim — the exact gap that let
+slice 4 ship its bugs.
 
 ## Slice 7: The classroom
 

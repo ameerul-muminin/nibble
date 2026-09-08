@@ -83,6 +83,14 @@ PROTECTED = [
     ("GET", "/documents/1/chunks", None),
     ("POST", "/search", {"query": "osmosis"}),
     ("POST", "/ask", {"question": "what is osmosis"}),
+    # Slice 6. A quiz is made from your notes and carries their answers, so
+    # every one of these is as private as the note it came from.
+    ("POST", "/quizzes", {"document_id": 1, "title": "Cells", "count": 5}),
+    ("GET", "/quizzes", None),
+    ("GET", "/quizzes/1", None),
+    ("PATCH", "/quizzes/1/questions/1", {"correct": 1}),
+    ("DELETE", "/quizzes/1/questions/1", None),
+    ("DELETE", "/quizzes/1", None),
 ]
 
 
