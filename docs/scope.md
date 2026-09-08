@@ -2710,10 +2710,16 @@ is probably running an older version" names a cause that was not this one. A
 backend that is not there at all and a backend that is out of date reach `api.js`
 as the same failed `fetch`, and only one of them has a sentence.
 
-**What is confirmed is the teacher's screen, the code, and the join.** Answering,
-handing in, ending the class and the sign-out that follows it were not part of
-that run and are still unproven in a browser. Written narrowly on purpose:
-"we tried it and it worked" is how a checklist stops meaning anything.
+**The whole run, end to end.** Teacher opens the class, student joins with the
+code, teacher presses Start, student answers and hands in, teacher ends the
+class, and the student is signed out. Every state the machine has, in the order
+a lesson actually goes through them, including the one place in Nibble where the
+app signs somebody out on its own.
+
+This was recorded in two passes — the join first, then the rest — and the
+narrower version is left in the history rather than smoothed over, because
+writing down exactly how far a run went is the habit that keeps a ticked box
+worth reading.
 
 ### Still needing a person
 
@@ -2721,12 +2727,8 @@ that run and are still unproven in a browser. Written narrowly on purpose:
       because slice 7's tables reference `quizzes` and `questions`. Opened as a PR
       before slice 6 lands, its diff is two slices and 2,000 lines, which is the
       review nobody really does.
-- [x] **Two accounts, one machine, on localhost, 2026-09-09.** Teacher opens a
-      class, second account joins with the code. See above for exactly how far
-      that run went.
-- [ ] **The rest of the run: Start, answer, hand in, End, and the sign-out.**
-      Everything after the join. The sign-out is the one worth watching, because
-      it is the only place in Nibble where the app signs somebody out on its own.
+- [x] **Two accounts, one machine, on localhost, 2026-09-09.** Open, join, Start,
+      answer, hand in, End, sign-out — the whole three-state machine, in order.
 - [ ] **A real class, on two devices, against the deployed backend.** A teacher on
       a laptop and a student on a phone. Two accounts on one machine proves the
       code and the join; it does not prove two people seeing different things at
