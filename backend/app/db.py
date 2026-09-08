@@ -127,6 +127,116 @@ CREATE TABLE IF NOT EXISTS questions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_questions_quiz_id ON questions(quiz_id);
+
+-- Slice 7 — the classroom.
+--
+-- Three tables, and not one of them is a `users` table or a `roles` table. A
+-- teacher is somebody who owns a room; a student is somebody with a row in
+-- room_members. That is the whole of it, and the three roads not taken are in
+-- adr/0004-teacher-is-an-owner.md.
+CREATE TABLE IF NOT EXISTS rooms (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    -- The teacher. Clerk's `sub` again, the same string documents.user_id and
+    -- quizzes.user_id hold. Named owner_id rather than user_id on purpose: a
+    -- room has two kinds of person in it, and "user" would not say which.
+    owner_id   TEXT    NOT NULL,
+
+    -- The quiz being run. ON DELETE CASCADE, so deleting a quiz takes its rooms
+    -- and — through the cascades below — their members and answers. Worth
+    -- knowing before somebody tidies up the morning of a lesson.
+    quiz_id    INTEGER NOT NULL,
+
+    -- What students type off the projector. Six characters, and UNIQUE because
+    -- the whole point of a code is that it names exactly one room. See
+    -- _new_code in routes.py for the alphabet and why O, 0, I and 1 are not in
+    -- it.
+    code       TEXT    NOT NULL UNIQUE,
+
+    -- waiting -> open -> closed, and never backwards. The CHECK is the only
+    -- constraint of its kind in this schema, and it earns its place: every
+    -- screen in this slice decides what to draw from this one value, so a
+    -- fourth string appearing in this column would break both of them at once
+    -- in a way no test would necessarily catch. The database refusing it is
+    -- cheaper than remembering to.
+    state      TEXT    NOT NULL DEFAULT 'waiting'
+               CHECK (state IN ('waiting', 'open', 'closed')),
+
+    created_at TEXT    NOT NULL,   -- ISO 8601, like every other created_at here
+
+    FOREIGN KEY (quiz_id) REFERENCES quizzes(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_rooms_owner_id ON rooms(owner_id);
+
+CREATE TABLE IF NOT EXISTS room_members (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    room_id   INTEGER NOT NULL,
+
+    -- The student. Clerk's `sub`, same as everywhere.
+    user_id   TEXT    NOT NULL,
+
+    joined_at TEXT    NOT NULL,
+
+    -- One row per person per room, enforced here rather than remembered in the
+    -- route. A student who refreshes the page, or comes back after their phone
+    -- locked, joins again — and must not become a second student, because the
+    -- teacher is watching that number on a projector while deciding whether to
+    -- start. The route inserts with OR IGNORE and this line is what makes that
+    -- mean something.
+    UNIQUE (room_id, user_id),
+
+    FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_room_members_room_id ON room_members(room_id);
+
+CREATE TABLE IF NOT EXISTS answers (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    room_id     INTEGER NOT NULL,
+
+    -- Who answered. Clerk's `sub`. There is no foreign key to room_members and
+    -- there does not need to be: the route checks membership before it writes,
+    -- and the pair (room_id, user_id) says the same thing a members row would.
+    user_id     TEXT    NOT NULL,
+
+    question_id INTEGER NOT NULL,
+
+    -- Which entry of the question's options they picked, 0 to 3. An index, for
+    -- exactly the reason questions.correct is one.
+    chosen      INTEGER NOT NULL,
+
+    -- 1 if right, 0 if wrong, written HERE at submit time rather than worked
+    -- out when somebody looks.
+    --
+    -- **It is stored in slice 7 even though nothing reads it until slice 8**,
+    -- and that is deliberate rather than premature. Slice 8 lets a teacher
+    -- override a mark, and the moment they can, `chosen == correct` is no
+    -- longer the answer — there would be two rules for one number and every
+    -- screen would have to know which applies. Writing it once at submit time
+    -- makes an override an ordinary UPDATE, and "was this changed?" is still
+    -- answerable by comparing it with chosen == correct at read time.
+    --
+    -- Adding it later would have been the expensive move: CREATE TABLE IF NOT
+    -- EXISTS silently will not add a column to a table that already exists,
+    -- which is the whole reason _check_shape below exists.
+    mark        INTEGER NOT NULL,
+
+    answered_at TEXT    NOT NULL,
+
+    -- One answer per person per question. The route refuses a second
+    -- submission outright, so this is the belt to that pair of braces: if a
+    -- double-tapped Submit ever gets past the route, the database still ends up
+    -- with one paper per student rather than two overlapping ones.
+    UNIQUE (room_id, user_id, question_id),
+
+    FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE,
+    FOREIGN KEY (question_id) REFERENCES questions(id) ON DELETE CASCADE
+);
+
+-- Slice 8 reads this two ways: everything one student answered, and everything
+-- answered for one question. Both start with the room.
+CREATE INDEX IF NOT EXISTS idx_answers_room_id ON answers(room_id);
 """
 
 

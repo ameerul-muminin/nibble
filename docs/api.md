@@ -522,6 +522,238 @@ someone tidies up their notes the morning of a lesson.
 
 ---
 
+## Slice 7 — planned
+
+The classroom. A teacher opens a **room** around a quiz they already own, students
+join with a code, everyone answers at once, and the teacher ends it.
+
+**A teacher is not a role.** A teacher is someone who owns a room, and a student is
+someone with a row in `room_members` — nothing else. The two doors on the landing
+page are navigation, not permission: they pick the screen you land on, they are
+never sent to the backend, and the backend would ignore them if they were.
+Authority is always a `WHERE owner_id = ?` in the same query that fetches the data.
+The full reasoning is in [`adr/0004-teacher-is-an-owner.md`](./adr/0004-teacher-is-an-owner.md).
+
+**A room is a three-state machine**, and everything on either screen is a
+consequence of which state it is in:
+
+| State | What it means | Who can do what |
+| --- | --- | --- |
+| `waiting` | The code is up, students are joining | Students join. Nobody answers. No questions are sent. |
+| `open` | The quiz is running | Students answer, once each. Latecomers can still join. |
+| `closed` | The teacher ended it | Nobody joins, nobody answers. Students are signed out. |
+
+**A room only ever moves forward.** `waiting` → `open` → `closed`. Asking for the
+state it is already in is a `200` that changes nothing, because a double-tap on
+Start in front of a class is not an error. Asking to go backwards is a `400`: a
+room that has ended cannot be reopened, and the answers already in it are the
+reason — reopening would let a second submission land against a class that is over.
+
+**The student never receives the answer key.** `GET /rooms/code/{code}` builds each
+question field by field — never `SELECT *`, never the whole row — so `correct` is
+not in the response at all. Neither is `page`: the student does not own the note
+the quiz was made from, so a page number tells them nothing and quietly says
+something about somebody else's chapter. This is the one rule in this slice whose
+failure is invisible, because an answer key sitting in a JSON response looks
+completely normal on screen.
+
+**The student screen finds out by asking every three seconds.** A poll, not a
+websocket — one protocol instead of two, and nobody in a classroom is racing.
+
+**Room codes** are six characters from an alphabet with no `O`, `0`, `I` or `1` in
+it, because the code is read off a projector and typed by thirty people. Codes are
+matched case-insensitively and surrounding spaces are ignored: `k7m2qp` and
+` K7M2QP ` are the same room.
+
+### `POST /rooms`
+
+Open a room around one of your own quizzes. The room starts in `waiting`.
+
+Request:
+
+```json
+{ "quiz_id": 3 }
+```
+
+Response, `201`:
+
+```json
+{
+  "id": 1,
+  "quiz_id": 3,
+  "title": "Chapter 4 — Cells",
+  "code": "K7M2QP",
+  "state": "waiting",
+  "member_count": 0,
+  "question_count": 5,
+  "created_at": "2026-09-09T14:02:11"
+}
+```
+
+`title` is the quiz's title, copied into the response rather than stored again —
+the room has no title of its own. `member_count` is how many students have joined,
+and it is what the teacher's screen watches while the code is on the projector.
+
+Errors:
+
+| Status | When |
+| --- | --- |
+| `404` | No quiz with that id, or it is not yours |
+| `503` | A free room code could not be found. Try again |
+
+### `GET /rooms`
+
+Every room you own, newest first. Same shape as above, one per room, including the
+closed ones — a finished class is still yours to look back at, and slice 8 reads it.
+
+### `GET /rooms/{id}`
+
+One room you own. **This is what the teacher's screen polls**, every three seconds,
+for the joiner count and to keep its own idea of the state honest. Same shape as
+the `POST` response.
+
+Errors: `404` not found, or not yours.
+
+### `POST /rooms/{id}/state`
+
+Start the room, or end it.
+
+```json
+{ "state": "open" }
+```
+
+Returns the room, same shape as above.
+
+Errors:
+
+| Status | When |
+| --- | --- |
+| `400` | `state` is not one of `waiting`, `open`, `closed` |
+| `400` | That move goes backwards — a closed room cannot be reopened |
+| `404` | No room with that id, or it is not yours |
+
+### `POST /rooms/join`
+
+Join a class with the code on the board. **Joining twice is fine** and is the same
+answer both times — a student who refreshes the page, or comes back after their
+phone locked, is not a second student, and the teacher's joiner count must not say
+they are.
+
+Request:
+
+```json
+{ "code": "k7m2qp" }
+```
+
+Response, `200`:
+
+```json
+{
+  "room_id": 1,
+  "code": "K7M2QP",
+  "title": "Chapter 4 — Cells",
+  "state": "waiting"
+}
+```
+
+A room that is already `open` still accepts joins, so somebody who arrives late can
+still sit the quiz.
+
+Errors:
+
+| Status | When |
+| --- | --- |
+| `400` | The code is empty, or that class has already ended |
+| `404` | No class with that code |
+
+### `GET /rooms/code/{code}`
+
+**The student's poll.** Called every three seconds while the student is in the
+room. You must have joined it.
+
+```json
+{
+  "room_id": 1,
+  "title": "Chapter 4 — Cells",
+  "state": "open",
+  "submitted": false,
+  "questions": [
+    {
+      "id": 11,
+      "position": 0,
+      "prompt": "What drives water across a semi-permeable membrane?",
+      "options": ["Active transport", "Osmosis", "Mitosis", "Respiration"]
+    }
+  ]
+}
+```
+
+**`questions` is empty unless the state is `open`.** Not while `waiting`, so the
+paper is not handed out before the teacher starts, and not once `closed`, because
+there is nothing left to do with it.
+
+**There is no `correct` and no `page`.** See the rule at the top of this slice.
+
+`submitted` says whether *you* have already answered. It is what stops a refresh
+offering the quiz a second time.
+
+Errors: `404` — no room with that code, **or you have not joined it**. The same
+answer for both, the same way a note that is not yours is a `404`.
+
+### `POST /rooms/{id}/answers`
+
+Hand the paper in. **One request with every answer in it**, not one per question:
+it is a single "Submitted" rather than a trickle, and thirty students answering ten
+questions is thirty requests instead of three hundred on a backend with a tenth of
+a CPU.
+
+```json
+{ "answers": [ { "question_id": 11, "chosen": 1 }, { "question_id": 12, "chosen": 3 } ] }
+```
+
+Response, `200`:
+
+```json
+{ "submitted": true, "answered": 2 }
+```
+
+**No score comes back, deliberately.** The mark is computed and stored, but the
+teacher can change it in slice 8, and a number that later moves is worse than no
+number. The student sees "Submitted". Practising alone is the opposite case and
+shows the score at once, because there nobody is going to overrule it.
+
+**A partial paper is accepted.** A student who ran out of time and answered three
+of five sends three. The missing ones are simply not there, and slice 8 reads them
+as unanswered rather than wrong.
+
+**You can only hand in once.** A second submission is a `400`, not a silent
+overwrite.
+
+Errors:
+
+| Status | When |
+| --- | --- |
+| `400` | The room has not started yet, or it has already ended |
+| `400` | `answers` is empty, a `chosen` is not 0-3, or a question is not in this room's quiz |
+| `400` | You have already answered |
+| `404` | No room with that id, or you have not joined it |
+
+### `DELETE /rooms/{id}`
+
+Delete a room you own. `204`, no body.
+
+**This takes the class's answers with it**, through `ON DELETE CASCADE` — the
+members and every answer they gave. There is nothing to undo it with, and slice 8's
+marking screen reads exactly that data.
+
+Errors: `404` not found, or not yours.
+
+**Deleting a quiz deletes the rooms made from it**, the same cascade again, and the
+same warning as the one under slice 6 about tidying up the morning of a lesson —
+one level deeper this time.
+
+---
+
 ## Rules for changing this file
 
 1. Alif writes the entry here **first**, before either side builds it.
