@@ -2695,9 +2695,25 @@ passed back down as a prop.
   step rather than three.
 - Frontend lint and a real `vite build` are both green.
 
-**Not opened in a browser.** Again. The API is proven and the components are
-proven by lint and build, which is not the same claim, and it is the exact gap
-that let slice 4 ship its bugs and that slice 6 also still has open.
+**Opened in a browser, by a person, 2026-09-09 — two accounts, one machine.**
+A teacher signed in and opened a class; a second account signed in separately,
+typed the code, and joined it. That is the claim this slice exists to make and
+it is the first time in four slices that the browser check has not been left
+open. Everything above it is HTTP and lint, which say nothing about whether the
+page draws.
+
+**The backend was not running when it was first tried**, and the failure looked
+like the app rather than the absence of one — the notes list said it could not
+fetch. Worth keeping next to slice 6's stale-backend note, because it is the
+same family of problem and the message was less useful this time: "the backend
+is probably running an older version" names a cause that was not this one. A
+backend that is not there at all and a backend that is out of date reach `api.js`
+as the same failed `fetch`, and only one of them has a sentence.
+
+**What is confirmed is the teacher's screen, the code, and the join.** Answering,
+handing in, ending the class and the sign-out that follows it were not part of
+that run and are still unproven in a browser. Written narrowly on purpose:
+"we tried it and it worked" is how a checklist stops meaning anything.
 
 ### Still needing a person
 
@@ -2705,11 +2721,17 @@ that let slice 4 ship its bugs and that slice 6 also still has open.
       because slice 7's tables reference `quizzes` and `questions`. Opened as a PR
       before slice 6 lands, its diff is two slices and 2,000 lines, which is the
       review nobody really does.
+- [x] **Two accounts, one machine, on localhost, 2026-09-09.** Teacher opens a
+      class, second account joins with the code. See above for exactly how far
+      that run went.
+- [ ] **The rest of the run: Start, answer, hand in, End, and the sign-out.**
+      Everything after the join. The sign-out is the one worth watching, because
+      it is the only place in Nibble where the app signs somebody out on its own.
 - [ ] **A real class, on two devices, against the deployed backend.** A teacher on
-      a laptop and a student on a phone. Nothing on one machine proves this: the
-      whole slice is about two people seeing different things at the same time.
-      This is the slice that needs the deploy, and it is still the only claim that
-      matters.
+      a laptop and a student on a phone. Two accounts on one machine proves the
+      code and the join; it does not prove two people seeing different things at
+      the same time over the internet on a tenth of a CPU. This is the slice that
+      needs the deploy, and it is still the claim that matters at the demo.
 - [ ] **Time the poll on Render's 0.1 CPU.** Thirty students at one request every
       three seconds is about ten a second. The read touches one row and two
       counts, so it should be comfortable — but "should be" is what slice 4.5 said
