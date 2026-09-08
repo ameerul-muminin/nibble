@@ -2419,6 +2419,23 @@ The lesson is about the guard rather than the bug: **"ignore stale replies" has
 to mean stale, not merely older.** A counter alone cannot tell those apart when
 several unrelated things share it.
 
+**And then it was wrong a third time**, caught by the same review. The
+cancellation sat *above* the `await`, so it cancelled on the assumption that the
+delete would succeed. When it did not — an expired session, a dropped
+connection, a 500 — the quiz was still there, the open already on its way had
+been thrown away, and the person got an error about deleting plus a screen that
+had quietly refused to navigate. Two failures reported as one.
+
+It now cancels only after the delete has actually succeeded, which still closes
+the original bug: the sole reason to cancel is that the quiz is gone. If the
+open's reply already landed while the delete was in flight, it is on screen and
+the existing `setOpen` line takes it off again.
+
+**Three rounds on four lines**, and the shape is worth keeping: *cancel on the
+outcome, never on the intention.* A guard that fires before the thing it is
+guarding against has happened will be wrong exactly as often as that thing
+fails.
+
 ### The 400 came back, and this time it was intermittent
 
 A quiz on the 31-page database chapter failed with **"The question writer
@@ -2446,6 +2463,39 @@ Checked by running it three times in a row on the chapter that failed: **3/3
 succeeded, ten questions each, drawn from pages 3 to 29 of 31.** That last part
 is the even spread working on prose, which also answers the caveat left above
 about the quality check having been done on a multiple-choice bank.
+
+### Open, deferred on purpose: asking for 10 often gives 5
+
+**Decided 2026-09-09: the demo shows 5 questions and this is not fixed first.**
+Five good questions demo exactly as well as ten, and slice 7 is worth more than
+this is. Written down rather than left as a surprise for whoever hits it next.
+
+The count is a ceiling, not a promise. `make_questions` returns `questions[:count]`,
+so a model that writes five gives five, and the prompt explicitly permits that:
+*"If the notes cannot support the number of questions asked for, return fewer."*
+
+**What is known, and it does not yet add up.** Run directly against the same
+31-page chapter, ten came back three times out of three — pages 3 to 29. Through
+the UI it is five. So the difference is not the note and not the model, which
+leaves the request or the retrieval around it. Worth knowing before guessing:
+
+- The model returning five and meaning it. The likeliest one, and the prompt
+  invites it — a spread sample of a chapter has visible gaps, and "cannot
+  support ten" is a fair reading of it.
+- The validator dropping five. Measurable in one run: compare what the model
+  returned against what `_validate` kept, which the diagnostic under "the free
+  tier was measured" already does.
+- A retry landing on a shorter second answer. The retry added for
+  `json_validate_failed` asks again from scratch, and nothing says the second
+  reply has to be as long as the first.
+
+**Where to start:** log both numbers — returned and kept — for one real UI
+request. That separates the three above in a single run, and none of them should
+be guessed at before it is done.
+
+The fix, if it is the first one, is likely the prompt: "return fewer" is
+permission the model is taking freely, and it was written to prevent invention
+rather than to license a short quiz.
 
 ### The stale backend, and why the message was right
 

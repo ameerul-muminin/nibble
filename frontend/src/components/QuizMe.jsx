@@ -185,28 +185,35 @@ export function QuizMe({ docs, onNoteGone }) {
   }
 
   async function handleDeleteQuiz(id) {
-    // A delete cancels a load **only when it is the same quiz**, and that
-    // condition is the whole point of this line.
-    //
-    // Bumping unconditionally was the first version, and it was too blunt: it
-    // made deleting quiz B silently cancel an open of quiz A that was still in
-    // flight. Nothing appeared, and nothing said why — the worst kind of
-    // failure, because there is nothing to react to. Deleting one quiz is not
-    // an opinion about a different one.
-    //
-    // Deleting the quiz that IS loading still has to cancel it, or its reply
-    // arrives afterwards and reopens something that no longer exists.
-    if (openingId.current === id) {
-      openRun.current += 1
-      openingId.current = null
-    }
-
     setNotice(null)
     try {
       await deleteQuiz(id)
+
+      // Cancelling the in-flight open happens **here**, after the delete has
+      // actually succeeded, and the position of these four lines is the whole
+      // fix.
+      //
+      // They used to sit above the `await`, which cancelled on the assumption
+      // that the delete would work. When it did not — an expired session, a
+      // dropped connection, a 500 — the quiz was still there, the open that was
+      // already on its way had been thrown away, and the person was left with
+      // an error about deleting and a screen that had quietly refused to
+      // navigate. Two failures reported as one.
+      //
+      // Cancelling only on success still closes the original bug, because the
+      // only reason to cancel is that the quiz is gone. If its reply already
+      // landed while the delete was in flight, it is on screen now and the line
+      // below takes it off again.
+      if (openingId.current === id) {
+        openRun.current += 1
+        openingId.current = null
+      }
+
       setQuizzes((current) => current.filter((quiz) => quiz.id !== id))
       setOpen((current) => (current && current.id === id ? null : current))
     } catch (error) {
+      // Nothing is cancelled on this path, on purpose: the quiz still exists,
+      // so an open of it is still a perfectly good thing to be waiting for.
       setNotice(error?.message || 'Nibble could not delete that quiz.')
     }
   }
