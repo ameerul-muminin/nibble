@@ -403,19 +403,36 @@ Errors: `404` not found, or not yours.
 
 ### `PATCH /quizzes/{id}/questions/{qid}`
 
-Customise a question. Send only the fields you are changing.
+Customise a question. Send only the fields you are changing — with one exception,
+which is the next paragraph and is not optional.
 
 ```json
 { "prompt": "Which process moves water across a membrane?", "correct": 1 }
 ```
 
-`options` may be sent as a whole array of exactly four strings; individual options
-cannot be patched one at a time. Returns the updated question.
+**Sending `options` requires sending `correct` with it.** `correct` is a *position*
+in `options`, not the text of the right answer. So replacing the list without
+restating which entry is right leaves an index pointing at whatever now happens to
+sit in that slot — reorder four options, or rewrite them, and the answer key is
+silently wrong. Nothing looks broken: the quiz still renders, still marks, and
+marks the wrong thing, for one person practising and for a whole class at once.
+`options` on its own is a `400`.
+
+The rule is deliberately one-directional. `correct` **may** be sent alone, because
+changing which entry is right does not disturb the list it points into; it is only
+changing the list that invalidates the index. So fixing a mis-keyed answer stays a
+one-field request.
+
+`options` is always the whole array of exactly four strings — individual options
+cannot be patched one at a time, for the same reason.
+
+Returns the updated question.
 
 Errors:
 
 | Status | When |
 | --- | --- |
+| `400` | `options` was sent without `correct` |
 | `400` | `correct` is not 0-3, `options` is not four strings, or a field is empty |
 | `404` | No such quiz or question, or the quiz is not yours |
 

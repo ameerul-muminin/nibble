@@ -63,7 +63,7 @@ already closed.
 | 2   | Chunking              | Slice 2 — Chunking        | done, merged            |
 | 3   | Search, no AI yet     | Slice 3 — Search          | done, merged            |
 | 4   | Nibble answers        | Slice 4 — Nibble answers  | done, merged            |
-| 4.5 | On the internet       | — (unplanned)             | built, not deployed     |
+| 4.5 | On the internet       | — (unplanned)             | done, merged, deployed  |
 | 5   | Make it Nibble        | Slice 5 — Make it Nibble  | paused — now last       |
 | 6   | Quiz yourself         | Slice 6 — Quiz yourself   | next                    |
 | 7   | The classroom         | Slice 7 — The classroom   | open                    |
@@ -93,11 +93,24 @@ whole slice after Slice 4 and updated nothing around it, so the table above had 
 4.5 row and this paragraph never learned 4.5 existed. That is the mirror rotting in
 the direction it always rots.
 
-**Slice 4.5 is built and sitting uncommitted in the working tree.** `auth.py`,
-`tests/conftest.py`, `tests/test_auth.py`, `Dockerfile`, `deploying.md` and
-`adr/0003-hosting.md` are all untracked; `routes.py`, `db.py`, `config.py`,
-`api.js` and `App.jsx` are modified. 147 backend tests pass. **Nothing has been
-deployed.**
+**Slice 4.5 is merged and deployed.** It merged as **PR #41**, and `main` is now
+at `2e62706`. 147 backend tests pass.
+
+**Nibble is on the internet**, which it has never been before:
+
+- Backend: <https://nibble-d75e.onrender.com> — a free Render web service built
+  from `backend/Dockerfile`. Not a Hugging Face Space; see the note under Slice
+  4.5 and [`adr/0005-render.md`](./adr/0005-render.md) for why that changed.
+- Frontend: <https://nibble-two-beta.vercel.app> — Vercel, root directory
+  `frontend`.
+
+Checked against the deployed backend rather than assumed: `/health` answers 200
+with no token, and `/documents` and `/ask` answer 401 without one — in our own
+sentences, not the JWT library's, including for a forged token.
+
+**Two things about the deploy are still owed**, and they are listed under Slice
+4.5 rather than here: nobody has signed in as two accounts to confirm they see
+different notes, and nobody has timed a real upload on Render's 0.1 CPU.
 
 ### The plan changed on 2026-09-08, and slice 5 moved to last
 
