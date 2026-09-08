@@ -201,6 +201,46 @@ ASK_FOLLOWUP_MAX_WORDS = 6
 # to make Nibble answer from something other than your notes.
 ASK_HISTORY_CHARS = 1000
 
+# --- Quizzes (slice 6) ---------------------------------------------------
+# How many questions a quiz has when nobody says otherwise.
+QUIZ_QUESTION_COUNT = 5
+
+# The most anybody can ask for, and this ceiling is Groq's rather than ours.
+#
+# The free tier caps OUTPUT at 1,000 tokens per minute and reserves against
+# max_tokens rather than against what actually comes back — the same trap
+# OCR_MAX_OUTPUT_TOKENS documents above. Ten questions is roughly 800 tokens,
+# which is most of a minute's allowance on a key already shared with reading
+# handwriting and with every /ask. Asking for twenty would not be slow, it would
+# be a 429 before a single question was written.
+QUIZ_MAX_QUESTIONS = 10
+
+# The ceiling on one quiz's reply. Ten questions of four options each, with
+# prompts, is about 800 tokens; 1000 leaves room for a long question without
+# reserving so much that the per-minute cap rejects the request outright.
+QUIZ_MAX_OUTPUT_TOKENS = 1000
+
+# How much of the note the model is shown when writing questions.
+#
+# A quiz is made from ONE note, and unlike /ask there is no question to retrieve
+# against — "write me five questions about this chapter" has no query. So the
+# chunks go in from the start of the document until this budget runs out.
+#
+# 12,000 characters is roughly the first dozen pages of a chapter. It is a
+# budget rather than a whole document on purpose: a 200-page book would
+# otherwise be sent in full, which is slow, and is a request large enough to be
+# refused. Questions then come from the beginning of a long note, which is
+# honest and predictable — and is written into the prompt so the model does not
+# pretend to have covered the end.
+QUIZ_MAX_CONTEXT_CHARS = 12_000
+
+# Writing a question is harder than answering one, so this is higher than
+# ANSWER_REASONING_EFFORT. A question needs three wrong options that are wrong
+# but not obviously wrong, which is the part a model gets lazy about at "low" —
+# it produces one plausible distractor and two throwaways, and the quiz marks
+# itself.
+QUIZ_REASONING_EFFORT = "medium"
+
 # --- Who is allowed to call us -------------------------------------------
 # A browser will refuse to let a page on :5173 call :8000 unless we say so.
 #

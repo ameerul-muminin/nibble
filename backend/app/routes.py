@@ -24,7 +24,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from pydantic import BaseModel
 
-from app import config, llm, ocr
+from app import config, llm, ocr, quiz
 from app.auth import current_user_id
 from app.chunking import chunk_pages
 from app.db import get_db
@@ -863,3 +863,455 @@ def ask(request: AskRequest, user_id: str = Depends(current_user_id)):
             for result in _dedupe_sources(results)
         ],
     }
+
+
+# ---------------------------------------------------------------------------
+# Slice 6 — Quiz yourself
+# ---------------------------------------------------------------------------
+#
+# Six routes, and every one starts the same way: prove the quiz is yours, then
+# do the work. That repetition is why _own_quiz below exists.
+#
+# There is no route for TAKING a quiz, and that is a decision rather than an
+# omission. GET /quizzes/{id} returns `correct` — it is your quiz, made from
+# your notes — so the browser already holds the answer key and marks as you go.
+# Solo practice therefore stores nothing: the score is on screen, and closing
+# the tab ends it. Marks are only stored for a classroom, where somebody other
+# than you needs to see them, and that is slice 8.
+
+
+class QuizRequest(BaseModel):
+    """The body of POST /quizzes: which note, what to call it, how many."""
+
+    document_id: int
+    title: str
+    count: int = config.QUIZ_QUESTION_COUNT
+
+
+class QuestionPatch(BaseModel):
+    """The body of PATCH on a question. Every field optional — send what changed.
+
+    ``options`` and ``correct`` are checked together in the route rather than
+    here, because the rule is about the pair and not about either one on its
+    own. Pydantic validates fields; a rule spanning two of them belongs where it
+    can see both.
+    """
+
+    prompt: str | None = None
+    options: list[str] | None = None
+    correct: int | None = None
+
+
+def _own_quiz(db, quiz_id: int, user_id: str) -> None:
+    """Raise 404 unless this quiz exists and belongs to this person.
+
+    **Not found and not yours are deliberately the same answer.** Telling
+    somebody a quiz exists but is not theirs confirms the id is real, which is
+    an invitation to go looking. It is also the honest answer: a quiz that is
+    not yours is, as far as you are concerned, not there. Same reasoning and
+    same sentence as GET /documents/{id}/chunks.
+    """
+    row = db.execute(
+        "SELECT id FROM quizzes WHERE id = ? AND user_id = ?",
+        (quiz_id, user_id),
+    ).fetchone()
+
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="That quiz isn't here. It may already have been deleted.",
+        )
+
+
+def _questions_of(db, quiz_id: int) -> list[dict]:
+    """Every question of one quiz, in the order they are asked.
+
+    ORDER BY position, then id. The second is a tie-breaker that stops two
+    questions sharing a position from swapping places between requests —
+    positions are unique today, but a later edit that reorders them should not
+    be able to make a quiz render differently on a refresh.
+    """
+    rows = db.execute(
+        "SELECT id, position, prompt, options, correct, page FROM questions "
+        "WHERE quiz_id = ? ORDER BY position, id",
+        (quiz_id,),
+    ).fetchall()
+
+    return [
+        {
+            "id": row["id"],
+            "position": row["position"],
+            "prompt": row["prompt"],
+            "options": json.loads(row["options"]),
+            "correct": row["correct"],
+            "page": row["page"],
+        }
+        for row in rows
+    ]
+
+
+@router.post("/quizzes", status_code=status.HTTP_201_CREATED)
+def create_quiz(request: QuizRequest, user_id: str = Depends(current_user_id)):
+    """Write a quiz from one of your notes. Calls the model, so it takes a moment.
+
+    Contract, from docs/api.md: the quiz with its questions, 201.
+
+    **This is scoped to one note, and that turns out to matter more than it
+    looks.** /ask searches every note you own, and with two chapters uploaded it
+    retrieves pieces of the wrong one — the dilution measured under Slice 4.6.
+    A quiz takes a document_id, so that problem cannot arise here.
+    """
+    title = request.title.strip()
+    if not title:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Give the quiz a name so you can find it again.",
+        )
+
+    if not 1 <= request.count <= config.QUIZ_MAX_QUESTIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Nibble writes between 1 and {config.QUIZ_MAX_QUESTIONS} questions at a time."
+            ),
+        )
+
+    db = get_db()
+    try:
+        # Ownership first, and through the document rather than the quiz —
+        # there is no quiz yet. Without this, anybody could build a quiz out of
+        # somebody else's note and read its contents back through the questions.
+        document = db.execute(
+            "SELECT id, filename FROM documents WHERE id = ? AND user_id = ?",
+            (request.document_id, user_id),
+        ).fetchone()
+
+        if document is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="That note isn't here. It may already have been deleted.",
+            )
+
+        chunks = db.execute(
+            "SELECT page, content FROM chunks WHERE document_id = ? ORDER BY id",
+            (request.document_id,),
+        ).fetchall()
+
+        if not chunks:
+            # A note from before slice 2 has no pieces, so there is nothing to
+            # write questions from. 422 rather than 400: the request was fine,
+            # the stored note is the problem, and re-uploading is the fix.
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=(
+                    "That note was added before Nibble could read it properly. "
+                    "Delete it and upload it again, then make a quiz from it."
+                ),
+            )
+
+        pieces = [
+            {"filename": document["filename"], "page": row["page"], "content": row["content"]}
+            for row in chunks
+        ]
+        pages = {row["page"] for row in chunks}
+    finally:
+        db.close()
+
+    # The model call happens with no database connection open. It takes seconds,
+    # and SQLite holds a lock for as long as a connection lives — so waiting on
+    # the network with one open is how two people generating quizzes at the same
+    # moment turn into one of them seeing "database is locked".
+    try:
+        questions = quiz.make_questions(quiz.build_prompt(pieces), request.count, pages)
+    except quiz.QuizUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Nibble couldn't write questions just now. {exc}",
+        ) from exc
+
+    created_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S")
+    db = get_db()
+    try:
+        cursor = db.execute(
+            "INSERT INTO quizzes (user_id, document_id, title, created_at) VALUES (?, ?, ?, ?)",
+            (user_id, request.document_id, title, created_at),
+        )
+        quiz_id = cursor.lastrowid
+
+        db.executemany(
+            "INSERT INTO questions (quiz_id, position, prompt, options, correct, page) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            [
+                (
+                    quiz_id,
+                    position,
+                    question["prompt"],
+                    json.dumps(question["options"]),
+                    question["correct"],
+                    question["page"],
+                )
+                for position, question in enumerate(questions)
+            ],
+        )
+        db.commit()
+
+        stored = _questions_of(db, quiz_id)
+    finally:
+        db.close()
+
+    return {
+        "id": quiz_id,
+        "document_id": request.document_id,
+        "title": title,
+        "created_at": created_at,
+        "questions": stored,
+    }
+
+
+@router.get("/quizzes")
+def list_quizzes(user_id: str = Depends(current_user_id)):
+    """Every quiz you own, newest first. No questions — this is the list you pick from.
+
+    ``question_count`` comes from a LEFT JOIN rather than a query per quiz. With
+    ten quizzes that difference is invisible; it is written this way because the
+    other version gets slower the more you use the app, and that is a bad habit
+    to leave in a file people copy from.
+
+    LEFT rather than INNER, so a quiz whose questions were somehow all deleted
+    still appears showing 0. An INNER JOIN would hide it, and a quiz you cannot
+    see is a quiz you cannot delete.
+    """
+    db = get_db()
+    try:
+        rows = db.execute(
+            """
+            SELECT q.id, q.document_id, q.title, q.created_at,
+                   COUNT(x.id) AS question_count
+            FROM quizzes q
+            LEFT JOIN questions x ON x.quiz_id = q.id
+            WHERE q.user_id = ?
+            GROUP BY q.id
+            ORDER BY q.id DESC
+            """,
+            (user_id,),
+        ).fetchall()
+    finally:
+        db.close()
+
+    return [
+        {
+            "id": row["id"],
+            "document_id": row["document_id"],
+            "title": row["title"],
+            "question_count": row["question_count"],
+            "created_at": row["created_at"],
+        }
+        for row in rows
+    ]
+
+
+@router.get("/quizzes/{quiz_id}")
+def get_quiz(quiz_id: int, user_id: str = Depends(current_user_id)):
+    """One quiz and all its questions, in order, with the answers.
+
+    ``correct`` is included because it is your quiz, made from your notes — the
+    single rule from docs/scope.md is that seeing answers follows ownership. It
+    is what lets practice work with no other route and nothing stored.
+    """
+    db = get_db()
+    try:
+        _own_quiz(db, quiz_id, user_id)
+
+        row = db.execute(
+            "SELECT id, document_id, title, created_at FROM quizzes WHERE id = ?",
+            (quiz_id,),
+        ).fetchone()
+
+        questions = _questions_of(db, quiz_id)
+    finally:
+        db.close()
+
+    return {
+        "id": row["id"],
+        "document_id": row["document_id"],
+        "title": row["title"],
+        "created_at": row["created_at"],
+        "questions": questions,
+    }
+
+
+@router.patch("/quizzes/{quiz_id}/questions/{question_id}")
+def update_question(
+    quiz_id: int,
+    question_id: int,
+    patch: QuestionPatch,
+    user_id: str = Depends(current_user_id),
+):
+    """Fix a question the model got wrong. Send only what changed.
+
+    **Sending options without correct is a 400, and it is the important rule in
+    this slice.** ``correct`` is a POSITION in ``options``, not the text of the
+    right answer. Replace the list without restating which entry is right and
+    the index points at whatever now sits in that slot — so the quiz still
+    renders, still marks, and marks the wrong thing. Nothing looks broken, for
+    one person practising or for a whole class at once.
+
+    One-directional on purpose: ``correct`` may be sent alone, because changing
+    which entry is right does not disturb the list it points into. Only changing
+    the list invalidates the index. So fixing a mis-keyed answer stays a
+    one-field request.
+    """
+    if patch.options is not None and patch.correct is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Say which of the new options is the right one. The answer is stored as "
+                "a position in the list, so changing the list without it would leave the "
+                "answer pointing at the wrong line."
+            ),
+        )
+
+    if patch.options is not None:
+        if len(patch.options) != quiz.OPTION_COUNT:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"A question needs exactly {quiz.OPTION_COUNT} options.",
+            )
+        if not all(option.strip() for option in patch.options):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="None of the options can be blank.",
+            )
+
+    if patch.correct is not None and not 0 <= patch.correct < quiz.OPTION_COUNT:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"The right answer has to be one of the {quiz.OPTION_COUNT} options.",
+        )
+
+    if patch.prompt is not None and not patch.prompt.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A question needs something to ask.",
+        )
+
+    db = get_db()
+    try:
+        _own_quiz(db, quiz_id, user_id)
+
+        existing = db.execute(
+            "SELECT id FROM questions WHERE id = ? AND quiz_id = ?",
+            (question_id, quiz_id),
+        ).fetchone()
+
+        if existing is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="That question isn't here. It may already have been deleted.",
+            )
+
+        # Built rather than written out, because three optional fields make
+        # seven combinations and writing them all out is how one gets forgotten.
+        changes: list[str] = []
+        values: list[object] = []
+
+        if patch.prompt is not None:
+            changes.append("prompt = ?")
+            values.append(patch.prompt.strip())
+
+        if patch.options is not None:
+            changes.append("options = ?")
+            values.append(json.dumps([option.strip() for option in patch.options]))
+
+        if patch.correct is not None:
+            changes.append("correct = ?")
+            values.append(patch.correct)
+
+        if changes:
+            values.extend([question_id, quiz_id])
+            db.execute(
+                f"UPDATE questions SET {', '.join(changes)} WHERE id = ? AND quiz_id = ?",
+                values,
+            )
+            db.commit()
+
+        row = db.execute(
+            "SELECT id, position, prompt, options, correct, page FROM questions WHERE id = ?",
+            (question_id,),
+        ).fetchone()
+    finally:
+        db.close()
+
+    return {
+        "id": row["id"],
+        "position": row["position"],
+        "prompt": row["prompt"],
+        "options": json.loads(row["options"]),
+        "correct": row["correct"],
+        "page": row["page"],
+    }
+
+
+@router.delete("/quizzes/{quiz_id}/questions/{question_id}", status_code=204)
+def delete_question(quiz_id: int, question_id: int, user_id: str = Depends(current_user_id)):
+    """Drop a question that came out wrong.
+
+    The remaining questions keep their ``position`` values rather than being
+    renumbered. Nothing reads them as a count, only as an order, so renumbering
+    would be work that could only introduce a bug.
+
+    Deleting the last question is refused: an empty quiz is the same non-result
+    as a generation that produced nothing, and it would sit in the list looking
+    takeable. Delete the quiz instead.
+    """
+    db = get_db()
+    try:
+        _own_quiz(db, quiz_id, user_id)
+
+        existing = db.execute(
+            "SELECT id FROM questions WHERE id = ? AND quiz_id = ?",
+            (question_id, quiz_id),
+        ).fetchone()
+
+        if existing is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="That question isn't here. It may already have been deleted.",
+            )
+
+        remaining = db.execute(
+            "SELECT COUNT(*) AS n FROM questions WHERE quiz_id = ?",
+            (quiz_id,),
+        ).fetchone()["n"]
+
+        if remaining <= 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "That's the last question. Delete the whole quiz instead of "
+                    "leaving an empty one."
+                ),
+            )
+
+        db.execute("DELETE FROM questions WHERE id = ? AND quiz_id = ?", (question_id, quiz_id))
+        db.commit()
+    finally:
+        db.close()
+
+
+@router.delete("/quizzes/{quiz_id}", status_code=204)
+def delete_quiz(quiz_id: int, user_id: str = Depends(current_user_id)):
+    """Delete a quiz and its questions.
+
+    The questions go through ON DELETE CASCADE rather than a second DELETE here
+    — which only works because get_db turns foreign keys on for every
+    connection. Without that PRAGMA this would silently leave every question
+    behind, attached to a quiz that no longer exists.
+    """
+    db = get_db()
+    try:
+        _own_quiz(db, quiz_id, user_id)
+        db.execute("DELETE FROM quizzes WHERE id = ? AND user_id = ?", (quiz_id, user_id))
+        db.commit()
+    finally:
+        db.close()

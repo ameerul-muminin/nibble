@@ -66,7 +66,7 @@ already closed.
 | 4.5 | On the internet       | — (unplanned)             | done, merged, deployed  |
 | 4.6 | What real use broke   | — (unplanned)             | built, not yet merged   |
 | 5   | Make it Nibble        | Slice 5 — Make it Nibble  | paused — now last       |
-| 6   | Quiz yourself         | Slice 6 — Quiz yourself   | next                    |
+| 6   | Quiz yourself         | Slice 6 — Quiz yourself   | built, not yet merged   |
 | 7   | The classroom         | Slice 7 — The classroom   | open                    |
 | 8   | Marking               | Slice 8 — Marking         | open                    |
 
@@ -2222,21 +2222,64 @@ a key already shared with reading handwriting and with `/ask`.
 
 ### Checklist
 
-- [ ] `adr/0004-teacher-is-an-owner.md` — why a teacher is an owner
-- [ ] `api.md` — the six quiz routes, **written before either side starts**
-- [ ] `db.py` — `quizzes` and `questions`
-- [ ] `config.py` — `QUIZ_QUESTION_COUNT`, `QUIZ_MAX_QUESTIONS`,
+- [x] `adr/0004-teacher-is-an-owner.md` — why a teacher is an owner. **This was
+      already written and the box was never ticked**; the drift is corrected here
+      rather than silently, as the rules at the top of this file ask.
+- [x] `api.md` — the six quiz routes. Also already written, also never ticked.
+- [x] `db.py` — `quizzes` and `questions`
+- [x] `config.py` — `QUIZ_QUESTION_COUNT`, `QUIZ_MAX_QUESTIONS`,
       `QUIZ_MAX_OUTPUT_TOKENS`, `QUIZ_MAX_CONTEXT_CHARS`, `QUIZ_REASONING_EFFORT`
-- [ ] `quiz.py` — `QUIZ_SYSTEM_PROMPT`, `QuizUnavailable`, `make_questions()`, and
+- [x] `quiz.py` — `QUIZ_SYSTEM_PROMPT`, `QuizUnavailable`, `make_questions()`, and
       the validator. Reuses `llm.build_context()` rather than formatting chunks a
       second time — the lesson #16 already taught
-- [ ] `routes.py` — `POST`/`GET` `/quizzes`, `GET /quizzes/{id}`, `PATCH` and
-      `DELETE` on a question, `DELETE /quizzes/{id}` _(Fahim, scaffolded)_
-- [ ] `App.jsx` — the "Quiz me" card: pick a note, generate, edit a question,
-      practise, see your score _(Arman, scaffolded)_
-- [ ] `api.js` — one function per route, and `error.status` attached in `request()`
-- [ ] `tests/test_quiz.py`, quiz-route tests, and every new route added to
-      `PROTECTED` in `test_auth.py`
+- [x] `routes.py` — `POST`/`GET` `/quizzes`, `GET /quizzes/{id}`, `PATCH` and
+      `DELETE` on a question, `DELETE /quizzes/{id}` _(Fahim's file — **built,
+      not scaffolded**; see below)_
+- [x] `QuizMe.jsx` — the "Quiz me" card: pick a note, generate, edit a question,
+      practise, see your score _(Arman's area — **built, not scaffolded**)_
+- [x] `api.js` — one function per route, and `error.status` attached in `request()`
+- [x] `tests/test_quiz.py` (31), `tests/test_quiz_routes.py` (36), and all six new
+      routes added to `PROTECTED` in `test_auth.py`. **245 backend tests pass.**
+
+### Two departures, both deliberate, both recorded rather than hidden
+
+**The scaffold rule was overridden, on the tech lead's instruction.** CLAUDE.md
+says anything assigned to somebody else is scaffolded with `TODO(name)`, so that
+whoever owns it comes out able to explain it. #22 is Fahim's and #23 is Arman's,
+and both were **built in full** instead, to get slice 6 finished quickly.
+
+The cost is the one CLAUDE.md names, and it is worth writing down so nobody is
+surprised by it at review: the pull-request gate is *explain this change in your
+own words*, and for these two files there is now nothing either of them built to
+explain. Either they read it and take it on before the PR, or the gate has to be
+waived for this slice. That is a people decision, not a code one.
+
+**The quiz card is its own file, not part of `App.jsx`.** The checklist above
+said `App.jsx`. It is `components/QuizMe.jsx` instead, because `App.jsx` was
+already past a thousand lines and another three hundred would have made the one
+file nobody wants to open. Same pattern as `Landing.jsx`, so it is not a new
+idea — but it is a change to the plan, so the plan is corrected here rather than
+quietly diverged from.
+
+### Checked against real Groq, 2026-09-09
+
+Generation was run for real against the 31-page database chapter, not just
+faked in tests. Five questions came back, all five validated, every page real:
+
+> **According to the notes, which problem is NOT listed as a reason for using a
+> database system?** (p.6) — A. Data redundancy and inconsistency · B. Difficulty
+> in accessing data · **C. High processing speed of queries** · D. Security
+> problems
+
+The distractors are the part worth noticing: they are all real items from the
+list on that page, with one plausible non-member. That is what
+`QUIZ_REASONING_EFFORT = "medium"` is buying, and it is why this one setting is
+higher than `/ask`'s — at "low" a model writes one plausible wrong option and two
+throwaways, and the quiz marks itself.
+
+**Not yet opened in a browser.** The API is proven against real Groq and the card
+is proven by lint and build, which is not the same claim — the exact gap that let
+slice 4 ship its bugs.
 
 ## Slice 7: The classroom
 

@@ -62,6 +62,71 @@ CREATE TABLE IF NOT EXISTS chunks (
 -- Every chunk lookup is "the chunks belonging to this document", so the
 -- database should be able to find them without reading every row.
 CREATE INDEX IF NOT EXISTS idx_chunks_document_id ON chunks(document_id);
+
+-- Slice 6 — quizzes.
+--
+-- New TABLES rather than new columns, and that is forced rather than tidy.
+-- `CREATE TABLE IF NOT EXISTS` does nothing at all to a table that already
+-- exists, including adding a column to it — which is exactly how slice 4.5
+-- produced a database the code no longer matched, and why _check_shape below
+-- exists at all. A new table costs an existing install nothing. A new column
+-- would make everybody delete their nibble.db.
+CREATE TABLE IF NOT EXISTS quizzes (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    -- Whose quiz this is, exactly as documents.user_id holds it: Clerk's `sub`.
+    -- This is the sixth thing in the codebase owned this way, not a new idea.
+    -- It is stored here as well as being reachable through the document because
+    -- ownership questions should be answerable without a join — every quiz
+    -- route starts with "is this yours".
+    user_id     TEXT    NOT NULL,
+
+    -- The note it was made from. ON DELETE CASCADE, so deleting a note takes
+    -- its quizzes with it the same way it already takes its chunks. Worth
+    -- knowing before somebody tidies up their notes the morning of a lesson.
+    document_id INTEGER NOT NULL,
+
+    title       TEXT    NOT NULL,
+    created_at  TEXT    NOT NULL,   -- ISO 8601, like documents.created_at
+
+    FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_quizzes_user_id ON quizzes(user_id);
+
+CREATE TABLE IF NOT EXISTS questions (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    quiz_id  INTEGER NOT NULL,
+
+    -- What order the questions are asked in. Deliberately NOT a count and never
+    -- renumbered: delete question 2 of 5 and the rest keep 0, 2, 3, 4. Nothing
+    -- reads these as "how many", only as "in what order", so renumbering would
+    -- be work that could only ever introduce a bug.
+    position INTEGER NOT NULL,
+
+    prompt   TEXT    NOT NULL,
+
+    -- The four answers, as a JSON array of strings. Same trick as
+    -- chunks.embedding: SQLite has no array type and json.dumps/json.loads is
+    -- the whole conversion. A separate options table would be a join and a
+    -- second insert for something that is always read all at once and always
+    -- has exactly four entries.
+    options  TEXT    NOT NULL,
+
+    -- Which entry of `options` is right, 0 to 3. An index rather than the text,
+    -- so a question can have two identically worded options without the answer
+    -- key becoming ambiguous.
+    correct  INTEGER NOT NULL,
+
+    -- The page of the note this question came from, so it can be checked
+    -- against what the page actually says while editing — the same claim
+    -- POST /ask makes with its sources.
+    page     INTEGER NOT NULL,
+
+    FOREIGN KEY (quiz_id) REFERENCES quizzes(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_questions_quiz_id ON questions(quiz_id);
 """
 
 

@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useAuth, UserButton } from '@clerk/react'
 import { ask, deleteDocument, getChunks, getHealth, listDocuments, search, setTokenGetter, uploadDocument } from './api'
 import { Landing } from './components/Landing'
+import { QuizMe } from './components/QuizMe'
 import './styles/global.css'
 
 // What we say for each state. Errors tell you what to DO, never just "error".
@@ -992,6 +993,23 @@ function Nibble() {
         Slice 2 — issue #10. The pieces the selected note was cut into.
 
         Rendered only when something is selected, so the very first thing anyone
+      {/*
+        Slice 6 — quiz yourself.
+
+        Below the notes list because it is made FROM a note: you have to have
+        one before this does anything, and the empty state says so rather than
+        offering a form that cannot work.
+
+        `docs` is passed down rather than fetched again, so the note dropdown
+        and the notes list can never disagree about what exists. onNoteGone lets
+        the quiz card tell App that a note turned out to be too old to quiz —
+        the one failure whose fix is deleting and re-uploading it — and it
+        reuses the same reloadKey the "Try again" button uses rather than adding
+        a second way to refresh the same list.
+      */}
+      <QuizMe docs={docs} onNoteGone={() => setReloadKey((n) => n + 1)} />
+
+      {/*
         sees is still the notes list and not an empty panel asking to be filled.
         Plain boxes for now: a page number and the text. Slice 5 makes it pretty.
       */}
