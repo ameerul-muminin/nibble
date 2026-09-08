@@ -11,6 +11,9 @@ HANDOFF.md
 # Delete it any time you want to start over with an empty app.
 *.db
 *.db-journal
+# ...and any copy of one kept while migrating. A database renamed out of the way
+# stops matching *.db and becomes an untracked file that git offers to commit.
+*.db.*
 
 # The embedding model downloads itself here the first time you run it (~130 MB)
 .fastembed_cache/

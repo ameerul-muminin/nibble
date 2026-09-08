@@ -105,6 +105,12 @@ function Nibble() {
   // Three separate small states rather than one big one, because they change
   // at different times and mixing them makes it harder to see what is going on.
   const [docsStatus, setDocsStatus] = useState('loading') // loading | ready | failed
+
+  // What the backend said when the list failed to load, or null if it said
+  // nothing useful. Kept separately from docsStatus because "it failed" and
+  // "here is why" are two different facts, and the second one is the one that
+  // saves somebody an hour.
+  const [docsError, setDocsError] = useState(null)
   // True while an upload is in flight. A typed file is instant; a scan or a
   // photo goes to the vision model a page at a time and takes seconds, which
   // is why the button says "Reading…" rather than nothing at all.
@@ -157,8 +163,17 @@ function Nibble() {
         // value instead.
         setSelectedId((current) => (rows.some((row) => row.id === current) ? current : null))
       })
-      .catch(() => {
+      .catch((error) => {
         if (ignore) return
+
+        // Keep the backend's own sentence. This used to throw the error away
+        // and show a fixed line guessing the backend was down — and the day the
+        // database file turned out to be from before notes had owners, the
+        // backend said exactly that, in words naming the fix, and the guess
+        // replaced it. Somebody then spent a while checking a backend that was
+        // running perfectly. Show what the server said whenever it said
+        // anything; the guess is only for when it truly said nothing.
+        setDocsError(error?.message || null)
         setDocsStatus('failed')
       })
 
@@ -389,7 +404,13 @@ function Nibble() {
     setAskError(null)
 
     try {
-      const body = await ask(trimmed)
+      // `turns` here is the conversation as it was when this handler started —
+      // everything already said, and not the question just typed. That is
+      // exactly the history the backend wants, and it is the one place where
+      // the stale-closure behaviour the comments above warn about is the
+      // correct behaviour rather than a bug: the new question travels in its
+      // own field, so including it here would send it twice.
+      const body = await ask(trimmed, turns)
 
       // A refusal arrives here, not in the catch. "That isn't in your notes
       // yet." is Nibble working correctly, and it goes in a bubble like any
@@ -845,6 +866,26 @@ function Nibble() {
           </button>
         </div>
 
+        {/*
+          What is happening while an upload is in flight.
+
+          This is here because "Reading…" on a button is not enough feedback for
+          how long this actually takes. Nibble turns every piece of a chapter
+          into numbers before it stores it, on the free host's very small share
+          of a CPU, and a chapter can take a minute or more. With nothing on
+          screen, people conclude it has hung and reload — which loses the
+          upload that was very nearly finished.
+
+          Two sentences: what it is doing, and roughly how long. Saying "this
+          takes a moment" without a number is the thing that reads as a hang.
+        */}
+        {busy && (
+          <p role="status" style={{ color: 'var(--text-muted)' }}>
+            Reading your note and getting it ready to search. A long chapter can take
+            a minute or two — you can leave this open.
+          </p>
+        )}
+
         {/* One plain sentence when something went wrong. Never a raw error. */}
         {notice && (
           <p role="status" style={{ color: 'var(--danger, #b3261e)' }}>
@@ -864,7 +905,7 @@ function Nibble() {
         {docsStatus === 'failed' && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--gap)' }}>
             <p style={{ color: 'var(--text-muted)', margin: 0 }}>
-              Could not load your notes. Check the backend is running.
+              {docsError || 'Could not load your notes. Check the backend is running.'}
             </p>
             <button
               type="button"

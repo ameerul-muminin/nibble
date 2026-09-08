@@ -19,6 +19,7 @@ testable without starting a server.
 import json
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from pydantic import BaseModel
@@ -620,10 +621,150 @@ def search(request: SearchRequest, user_id: str = Depends(current_user_id)):
 # ---------------------------------------------------------------------------
 
 
+class AskTurn(BaseModel):
+    """One thing already said in this conversation, on the way back to us.
+
+    ``role`` is a Literal rather than a plain string on purpose: Pydantic turns
+    anything that is not "user" or "nibble" into a 422 before this code runs, the
+    same way `document_id: int` rejects /documents/abc. It is the cheapest place
+    to stop a browser sending a role of its own invention.
+
+    "nibble" rather than "assistant" because that is the word the rest of the
+    project uses. llm.py translates it on the way to the model.
+    """
+
+    role: Literal["user", "nibble"]
+    content: str
+
+
 class AskRequest(BaseModel):
-    """The body of a POST /ask request: {"question": "explain osmosis simply"}."""
+    """The body of a POST /ask request.
+
+    ``history`` is optional and defaults to empty, so an older frontend — or
+    curl — still works exactly as it did.
+    """
 
     question: str
+    history: list[AskTurn] = []
+
+
+def _recent_turns(history: list[AskTurn]) -> list[dict]:
+    """The last few turns, trimmed, as plain dicts.
+
+    Two limits, and both exist because this came from a browser.
+
+    ``ASK_HISTORY_TURNS`` takes the most recent turns rather than the first
+    ones: a follow-up is about what was just said, and an hour-old exchange is
+    noise wearing the costume of context.
+
+    ``ASK_HISTORY_CHARS`` cuts each one. Without it, a long enough transcript
+    pushes the retrieved notes out of what the model can hold — which is the one
+    way to make Nibble answer from something that is not your notes, arriving
+    through the front door.
+
+    **Nibble's own turns are thrown away here, and that is a security decision
+    rather than a tidying one.** The browser sends back a transcript it claims is
+    this conversation, and nothing about it can be verified: the backend stores
+    no conversations, so it has no copy to check against. A turn labelled
+    "nibble" is therefore just text a client asserted Nibble once said.
+
+    Passed on to the model as an assistant message, that text is trusted — it
+    reads as something the model itself concluded earlier. So a crafted request
+    could put a fabricated claim, or an instruction, into the model's own mouth
+    and have the answer built on it — while the reply comes back wearing a list
+    of note sources, which says the answer came from the student's notes. That
+    is precisely the guarantee this whole project exists to make.
+
+    Keeping only the `user` turns closes it completely, and costs almost
+    nothing: what a follow-up needs is the subject, and the subject is in the
+    questions. "what are the experiments" then "name them" resolves fine with no
+    assistant turn anywhere near it.
+
+    The API still *accepts* `nibble` turns, because the frontend sends the
+    transcript it is drawing and rejecting half of it would be a strange
+    contract. They are accepted and ignored.
+    """
+    recent = history[-config.ASK_HISTORY_TURNS :] if config.ASK_HISTORY_TURNS else []
+
+    return [
+        {"role": turn.role, "content": turn.content.strip()[: config.ASK_HISTORY_CHARS]}
+        for turn in recent
+        if turn.role == "user" and turn.content.strip()
+    ]
+
+
+def _search_text(question: str, turns: list[dict]) -> str:
+    """What we actually embed and search for, which is not always the question.
+
+    **This function is the fix for the worst bug slice 4 shipped with.** Somebody
+    asked "What are the experiments?", got an answer, then typed "name them" —
+    and Nibble replied with one unrelated item. It read like the model inventing
+    things. It was not. "name them" was embedded on its own, and two words with
+    no subject match nothing in particular, so search returned near-random
+    pieces and the model answered from those. It did exactly as it was told.
+
+    So the question is searched together with what was recently asked, and
+    "name them" goes looking for the experiments again.
+
+    **Only the `user` turns.** Nibble's own answers are deliberately left out,
+    and that is the non-obvious half. Feeding a model's replies back into the
+    search makes each question drift toward what it has already said — it finds
+    the pages it already used, answers from them again, and gets more confident
+    about a wrong turn every time. Searching for what the *person* asked keeps
+    the conversation anchored to them.
+
+    **History is only used for a question that cannot stand on its own.** Joining
+    it onto every question was wrong, and wrong in a way that showed up the first
+    time somebody had two subjects in one Nibble. Ask about a database chapter,
+    then ask "for the CSE 224 lab, name the six experiments", and the database
+    questions were still glued to the front of the search — so the search went
+    looking for something half about databases, and pieces of the wrong chapter
+    came back and were handed to the model as if they were relevant.
+
+    A question long enough to name its own subject does not need the ones before
+    it. "name them" does; "for the CSE 224 lab, can you name the 6 experiments"
+    plainly does not, and is only hurt by it.
+
+    Word count is a blunt way to tell those apart, and it is chosen over anything
+    cleverer precisely because it can be explained in one line and predicted
+    without running it. It is not perfect: a short question that *does* change
+    the subject — "summarise the DB chapter" — still picks up the previous ones.
+    That failure is smaller than the one it replaces and is written down in
+    docs/scope.md rather than hidden here.
+    """
+    asked = [turn["content"] for turn in turns if turn["role"] == "user"]
+
+    if not asked or len(question.split()) > config.ASK_FOLLOWUP_MAX_WORDS:
+        return question
+
+    return " ".join([*asked, question])
+
+
+def _dedupe_sources(results: list[dict]) -> list[dict]:
+    """One entry per page, keeping the best-scoring piece of each.
+
+    Retrieval works on pieces, and one page often supplies two of them. Shown
+    raw, that is "p. 1" listed twice under an answer with two different
+    excerpts, which reads as a bug to anybody who notices it.
+
+    This runs **after** the model has been given everything. It does not change
+    what Nibble read — only what is listed on screen — so the claim the sources
+    list makes stays true.
+
+    ``results`` arrives sorted best-first, so the first time a page is seen is
+    its best piece, and every later one is dropped.
+    """
+    seen = set()
+    unique = []
+
+    for result in results:
+        key = (result["filename"], result["page"])
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(result)
+
+    return unique
 
 
 # How much of a chunk goes into an excerpt on screen.
@@ -677,8 +818,13 @@ def ask(request: AskRequest, user_id: str = Depends(current_user_id)):
             detail="Ask Nibble something and it will look through your notes.",
         )
 
+    # What was recently said, and what to search for because of it. A first
+    # question searches for itself; a follow-up searches for itself plus what
+    # led to it. See _search_text above for why that matters so much.
+    turns = _recent_turns(request.history)
+
     try:
-        results, _unsearchable = _retrieve(question, user_id)
+        results, _unsearchable = _retrieve(_search_text(question, turns), user_id)
     except EmbeddingUnavailable as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -696,13 +842,15 @@ def ask(request: AskRequest, user_id: str = Depends(current_user_id)):
         }
 
     try:
-        text = llm.answer(question, llm.build_context(results))
+        text = llm.answer(question, llm.build_context(results), history=turns)
     except llm.AnswerUnavailable as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Nibble couldn't answer just now. {exc}",
         ) from exc
 
+    # Deduplicated only now, after the model has seen every piece. What it read
+    # is unchanged; this is about what the list on screen looks like.
     return {
         "answer": text,
         "sources": [
@@ -712,6 +860,6 @@ def ask(request: AskRequest, user_id: str = Depends(current_user_id)):
                 "page": result["page"],
                 "excerpt": _excerpt(result["content"]),
             }
-            for result in results
+            for result in _dedupe_sources(results)
         ],
     }
