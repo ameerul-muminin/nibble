@@ -306,6 +306,160 @@ model is not called at all.**
 
 ---
 
+## Slice 6 — planned
+
+Quizzes. Nibble reads one of your notes and writes multiple-choice questions from
+it, each carrying the page it came from. **Anyone can do this** — it is part of the
+regular app, not a teacher feature. Slice 7 adds rooms on top, and a room runs a
+quiz that already exists.
+
+**One rule governs the answer key, everywhere:** `correct` follows ownership. You
+can always see the answers to a quiz you own, because it was made from your notes.
+You can never see the answers to somebody else's quiz you are sitting a room for —
+slice 7's student endpoint strips the field out entirely.
+
+### `POST /quizzes`
+
+Generate a quiz from one of your own notes. This calls the language model, so it
+takes a few seconds.
+
+Request:
+
+```json
+{ "document_id": 1, "title": "Chapter 4 — Cells", "count": 5 }
+```
+
+`count` is optional and defaults to 5. It must be between 1 and 10; the ceiling is
+Groq's free tier, which caps output at 1,000 tokens per minute and reserves against
+the requested maximum, so ten questions is already most of a minute's allowance.
+
+Response, `201`:
+
+```json
+{
+  "id": 3,
+  "document_id": 1,
+  "title": "Chapter 4 — Cells",
+  "created_at": "2026-09-08T14:02:11",
+  "questions": [
+    {
+      "id": 11,
+      "position": 0,
+      "prompt": "What drives water across a semi-permeable membrane?",
+      "options": ["Active transport", "Osmosis", "Mitosis", "Respiration"],
+      "correct": 1,
+      "page": 4
+    }
+  ]
+}
+```
+
+`correct` is the index into `options`, `0` to `3`. `page` is the page of your note
+the question came from, and it is shown while editing so the question can be
+checked against what the page actually says — the same claim `POST /ask` makes with
+its sources.
+
+**Questions come only from the note.** If a chapter cannot support `count`
+questions, fewer come back rather than invented ones. An empty list is never
+returned; that is a `503` instead, because a quiz with no questions is not a
+result, it is a failure that looks like one.
+
+Errors:
+
+| Status | When |
+| --- | --- |
+| `400` | `count` is outside 1-10, or the title is empty |
+| `404` | No note with that id, or it is not yours |
+| `422` | The note has no chunks — it was uploaded before Slice 2. Delete it and upload it again |
+| `503` | The answering service could not be reached, or returned something that was not a usable quiz |
+
+### `GET /quizzes`
+
+Every quiz you own, newest first. No questions in the response — this is the list
+you pick from.
+
+```json
+[
+  {
+    "id": 3,
+    "document_id": 1,
+    "title": "Chapter 4 — Cells",
+    "question_count": 5,
+    "created_at": "2026-09-08T14:02:11"
+  }
+]
+```
+
+### `GET /quizzes/{id}`
+
+One quiz and all of its questions, in `position` order. Same shape as the `POST`
+response, **`correct` included** — it is your quiz.
+
+This is the endpoint practice uses. The browser holds the key and marks your
+answers as you go, which is why practising alone needs no other route and stores
+nothing. Close the tab and the score is gone.
+
+Errors: `404` not found, or not yours.
+
+### `PATCH /quizzes/{id}/questions/{qid}`
+
+Customise a question. Send only the fields you are changing — with one exception,
+which is the next paragraph and is not optional.
+
+```json
+{ "prompt": "Which process moves water across a membrane?", "correct": 1 }
+```
+
+**Sending `options` requires sending `correct` with it.** `correct` is a *position*
+in `options`, not the text of the right answer. So replacing the list without
+restating which entry is right leaves an index pointing at whatever now happens to
+sit in that slot — reorder four options, or rewrite them, and the answer key is
+silently wrong. Nothing looks broken: the quiz still renders, still marks, and
+marks the wrong thing, for one person practising and for a whole class at once.
+`options` on its own is a `400`.
+
+The rule is deliberately one-directional. `correct` **may** be sent alone, because
+changing which entry is right does not disturb the list it points into; it is only
+changing the list that invalidates the index. So fixing a mis-keyed answer stays a
+one-field request.
+
+`options` is always the whole array of exactly four strings — individual options
+cannot be patched one at a time, for the same reason.
+
+Returns the updated question.
+
+Errors:
+
+| Status | When |
+| --- | --- |
+| `400` | `options` was sent without `correct` |
+| `400` | `correct` is not 0-3, `options` is not four strings, or a field is empty |
+| `404` | No such quiz or question, or the quiz is not yours |
+
+### `DELETE /quizzes/{id}/questions/{qid}`
+
+Drop a question that came out wrong. `204`, no body. The remaining questions keep
+their `position` values rather than being renumbered — nothing reads them as a
+count, only as an order.
+
+Deleting the last question of a quiz is refused with a `400`, because an empty quiz
+is the same non-result as a generation that produced nothing. Delete the quiz
+instead.
+
+Errors: `400` as above, `404` not found or not yours.
+
+### `DELETE /quizzes/{id}`
+
+Deletes the quiz and its questions. `204`, no body.
+
+Errors: `404` not found, or not yours.
+
+**Deleting a note deletes the quizzes made from it**, through `ON DELETE CASCADE`,
+the same way it already takes the note's chunks. That is worth knowing before
+someone tidies up their notes the morning of a lesson.
+
+---
+
 ## Rules for changing this file
 
 1. Alif writes the entry here **first**, before either side builds it.

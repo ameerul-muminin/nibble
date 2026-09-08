@@ -63,25 +63,76 @@ already closed.
 | 2   | Chunking              | Slice 2 — Chunking        | done, merged            |
 | 3   | Search, no AI yet     | Slice 3 — Search          | done, merged            |
 | 4   | Nibble answers        | Slice 4 — Nibble answers  | done, merged            |
-| 5   | Make it Nibble        | Slice 5 — Make it Nibble  | in progress             |
-| 6   | Quiz mode (stretch)   | Slice 6 — Quiz mode       | open                    |
+| 4.5 | On the internet       | — (unplanned)             | done, merged, deployed  |
+| 5   | Make it Nibble        | Slice 5 — Make it Nibble  | paused — now last       |
+| 6   | Quiz yourself         | Slice 6 — Quiz yourself   | next                    |
+| 7   | The classroom         | Slice 7 — The classroom   | open                    |
+| 8   | Marking               | Slice 8 — Marking         | open                    |
 
-**The demo is safe from the end of Slice 4.** Slices 5 and 6 are polish that can be
-dropped if time runs out.
+**Build order is no longer the same as the numbering**, as of 2026-09-08: deploy
+4.5, then 6, 7, 8, and slice 5 last. Why is under "Current state" below.
+
+**The demo is safe from the end of Slice 4.** Everything after it is either polish
+or the classroom feature, and both can be dropped if time runs out.
 
 **Slice 3 is the pivotal one.** Semantic search with no chatbot involved — typing
 "osmosis" and watching the right paragraph surface. It's the moment RAG stops being
 magic, and it's a working demo on its own even if everything after it fails.
 
-## Current state, 2026-09-07
+## Current state, 2026-09-08
 
 `main` is at `b3219a4` and **Slices 0, 1, 1.5, 2, 3 and 4 are all merged.** #33
 (chunking), #35 (the slice 2 handover and the open-backend decision), #34 (the
 landing page), #36 (`embeddings.py`), #37 (the rest of search) and #40 (the whole
 of slice 4) all landed within two days, and **#11 through #17 are closed.**
 
-**Slice 5 is the current slice**, and it is the first one that is polish rather
-than plumbing. The four issues in it are #18, #19, #20 and #21.
+**This section drifted and is being corrected out loud, as the rules above ask.**
+It was headed 2026-09-07 and said Slice 5 was the current slice. Slice 4.5 was
+built the next day and its edit to this file was a pure insertion — it added a
+whole slice after Slice 4 and updated nothing around it, so the table above had no
+4.5 row and this paragraph never learned 4.5 existed. That is the mirror rotting in
+the direction it always rots.
+
+**Slice 4.5 is merged and deployed.** It merged as **PR #41**, and `main` is now
+at `2e62706`. 147 backend tests pass.
+
+**Nibble is on the internet**, which it has never been before:
+
+- Backend: <https://nibble-d75e.onrender.com> — a free Render web service built
+  from `backend/Dockerfile`. Not a Hugging Face Space; see the note under Slice
+  4.5 and [`adr/0005-render.md`](./adr/0005-render.md) for why that changed.
+- Frontend: <https://nibble-two-beta.vercel.app> — Vercel, root directory
+  `frontend`.
+
+Checked against the deployed backend rather than assumed: `/health` answers 200
+with no token, and `/documents` and `/ask` answer 401 without one — in our own
+sentences, not the JWT library's, including for a forged token.
+
+**Two things about the deploy are still owed**, and they are listed under Slice
+4.5 rather than here: nobody has signed in as two accounts to confirm they see
+different notes, and nobody has timed a real upload on Render's 0.1 CPU.
+
+### The plan changed on 2026-09-08, and slice 5 moved to last
+
+Nibble is growing a classroom: a teacher generates a quiz from a chapter, opens a
+room, students join with a code, answer, and the teacher marks what comes back.
+That is slices 6, 7 and 8 below, and it replaces the old one-line "Slice 6: Quiz
+mode" stretch goal.
+
+**Slice 5 is paused where it is, and that breaks "finish a slice before starting
+the next."** It is written down rather than smoothed over, because it is a real
+departure from [`team.md`](./team.md):
+
+- **A classroom cannot be demoed on one laptop.** It needs a second person on a
+  second device, which means the 4.5 deploy stops being optional the moment this
+  feature exists. Deploying is now the next thing that happens.
+- **Slice 6 is useful on its own to every user**, teacher or not — quiz yourself
+  from your own notes. So the ordering does not gamble the demo on the classroom
+  landing.
+- **The cost is that the demo runs on slice 5's unfixed CSS.** Note rows and chunk
+  boxes currently render with **no border at all** — see the four broken lines under
+  Slice 5. So `fix/borders-and-danger-token` is pulled out of slice 5 and done on
+  its own, first, because it is four lines and it is visible in every screenshot.
 
 **The demo now exists.** Upload a chapter, ask a question in your own words, and
 the right paragraph comes back with the page it is on and how well it matched —
@@ -124,8 +175,16 @@ were built and merged weeks apart from being closed, and for a while this file
 said so while the board did not. That gap is shut and has stayed shut: every
 slice since has closed its issues on the merge that finished it.
 
-**The six still open are the whole of slices 5 and 6** — #18, #19, #20 and #21,
-then #22 and #23. Nothing before slice 5 is outstanding on the board.
+**The six still open are #18, #19, #20 and #21 (slice 5), then #22 and #23.**
+Nothing before slice 5 is outstanding on the board.
+
+**The board does not know about the 2026-09-08 replan yet, and that is work owed
+rather than a disagreement.** #22 and #23 were written for the one-line "Quiz
+mode" stretch goal; they now belong to Slice 6 and Slice 7 respectively and their
+milestones have to move. Slices 7 and 8 have no milestone and no issues at all,
+and slice 4.5 never had either. Until somebody creates them, this file is ahead of
+the board — which is the opposite of the usual drift and just as worth saying out
+loud. **GitHub still wins on status**; it simply has not been told yet.
 
 The rule that produced the fix is worth keeping: an issue is done when it is
 closed, not when a box here is ticked. Saying the two disagreed out loud, rather
@@ -1612,10 +1671,17 @@ laptop.
 
 ### Still needing a person
 
-- [ ] **The actual deploy.** Everything here is verified locally. Nobody has
-      created the Render service or the Vercel project yet, and a deploy that has
-      not run is a deploy that does not work. [`deploying.md`](./deploying.md) is
-      the script to follow.
+- [x] **The actual deploy, done 2026-09-08.** Backend on Render at
+      <https://nibble-d75e.onrender.com>, frontend on Vercel at
+      <https://nibble-two-beta.vercel.app>, and `CORS_ORIGINS` set so the two can
+      talk. Checked against the running services rather than assumed: `/health`
+      answers 200 with no token, `/documents` and `/ask` answer 401 without one,
+      and a CORS preflight from the Vercel origin comes back allowing exactly that
+      origin — not a wildcard.
+- [ ] **Nobody has opened the deployed site in a browser.** Everything above is
+      HTTP-level, which says nothing about whether the page renders. This is the
+      same gap slices 2, 3 and 4 each left behind, arriving by a third route: a
+      green check is not a person having looked.
 - [ ] **Time one real upload on Render.** The free tier gives 0.1 of a CPU and
       every timing in this project was measured on a laptop. Nobody knows yet how
       slow embedding is on a fraction of a shared core. This is the open risk in
@@ -1746,12 +1812,193 @@ was built from the start. What is left:
   Alif, so the crossing is sanctioned by the issue rather than taken, but it gets
   named in the pull request rather than passing silently.
 
-## Slice 6: Quiz mode
+## Slice 6: Quiz yourself
 
-Stretch. Drop it without regret if the demo date gets close.
+Nibble reads one of your notes and writes multiple-choice questions from it, each
+carrying the page it came from. You fix the ones that came out wrong and then
+practise. Contract in [`api.md`](./api.md) under "Slice 6".
 
-- [ ] #22 Generate quiz questions from the notes _(Fahim)_
-- [ ] #23 Quiz screen _(Arman)_
+**This absorbs the old slice 6, "Quiz mode".** #22 — generate quiz questions from
+the notes — is this slice. #23, the quiz screen, moves to Slice 7. Neither issue is
+orphaned and no issue is being invented after the fact, which is the mistake the
+Clerk sign-in note above warns about.
+
+**No teacher, no code, no classroom in this slice.** It is demoable on one laptop
+and it is useful to every single user. That is deliberate: the classroom needs a
+deploy and a second device before it can be shown to anybody, and betting the whole
+feature on that is how a slice stops being vertical.
+
+### Decided, 2026-09-08, before building
+
+**A teacher is not a role. A teacher is someone who owns a room.** The requirement
+is that _anyone_ can be a teacher, and "anyone can be" is the same sentence as
+"there is no role". `rooms.owner_id` holds a Clerk `sub` exactly as
+`documents.user_id` already does, so this is the sixth use of an idea already in the
+codebase rather than a new one. The full reasoning, and the three roads not taken —
+an allowlist in `config.py`, a `role` claim in Clerk's token, a local roles table —
+are in [`adr/0004-teacher-is-an-owner.md`](./adr/0004-teacher-is-an-owner.md).
+
+**The two doors on the landing page are navigation, not permission.** "Log in as a
+teacher" picks the screen you land on and grants nothing. This is worth saying in
+exactly those words, because the failure it prevents is silent: if the backend ever
+trusted a role the browser sent, a student could send it too. Authority is always a
+`WHERE owner_id = ?` in the same query that fetches the data.
+
+It follows that the doors are not a partition. A student joins a class from inside
+the regular app; a teacher quizzes himself from his own notes. Nobody is stuck
+behind the door they came through.
+
+**A quiz is a thing you own; a room is a session that runs one.** Keeping them
+separate is what lets a regular user get value with no classroom anywhere near them,
+and it lets a teacher run the same quiz in two classes. Folding them together would
+have made "practise alone" a room with one member and no teacher, which is a
+contortion you would have to explain every time.
+
+**`correct` follows ownership.** You can always see the answers to a quiz you own —
+it was made from your notes. You can never see the answers to somebody else's quiz
+you are sitting a room for. That is one rule rather than two, and it is why solo
+practice needs no marking endpoint at all: the browser already holds a key it is
+entitled to.
+
+**Solo practice stores nothing.** You take your own quiz, the score is on screen,
+and closing the tab ends it. An attempt history is a whole extra table and screen
+for something nobody asked for. Marks are only ever stored for a classroom, where
+somebody other than you needs to see them.
+
+**Five new tables, and nothing existing changes.** `quizzes`, `questions`, `rooms`,
+`room_members` and `answers` — none of them touching `documents` or `chunks`. This
+is not tidiness, it is forced: `db.py` has no migrations, `CREATE TABLE IF NOT
+EXISTS` silently will not add a _column_ to a table that already exists, and
+`_check_shape()` exists precisely because slice 4.5 hit that. New tables are free; a
+new column would make everybody delete their `nibble.db`.
+
+**The model's JSON is validated, not trusted.** `quiz.py` asks Groq for a JSON
+object and then checks the reply itself — the right number of questions, four
+options each, `correct` in range, a page that exists. Anything else is a
+`QuizUnavailable` and a 503 sentence. A model returning _almost_ right JSON is the
+realistic failure here, and storing it puts a broken question in front of a class.
+
+**Ten questions is the ceiling, and the reason is the same one as slice 1.5.**
+Groq's free tier caps output at 1,000 tokens per minute and reserves against
+`max_tokens`. Ten questions is roughly 800 tokens — most of a minute's allowance, on
+a key already shared with reading handwriting and with `/ask`.
+
+### Checklist
+
+- [ ] `adr/0004-teacher-is-an-owner.md` — why a teacher is an owner
+- [ ] `api.md` — the six quiz routes, **written before either side starts**
+- [ ] `db.py` — `quizzes` and `questions`
+- [ ] `config.py` — `QUIZ_QUESTION_COUNT`, `QUIZ_MAX_QUESTIONS`,
+      `QUIZ_MAX_OUTPUT_TOKENS`, `QUIZ_MAX_CONTEXT_CHARS`, `QUIZ_REASONING_EFFORT`
+- [ ] `quiz.py` — `QUIZ_SYSTEM_PROMPT`, `QuizUnavailable`, `make_questions()`, and
+      the validator. Reuses `llm.build_context()` rather than formatting chunks a
+      second time — the lesson #16 already taught
+- [ ] `routes.py` — `POST`/`GET` `/quizzes`, `GET /quizzes/{id}`, `PATCH` and
+      `DELETE` on a question, `DELETE /quizzes/{id}` _(Fahim, scaffolded)_
+- [ ] `App.jsx` — the "Quiz me" card: pick a note, generate, edit a question,
+      practise, see your score _(Arman, scaffolded)_
+- [ ] `api.js` — one function per route, and `error.status` attached in `request()`
+- [ ] `tests/test_quiz.py`, quiz-route tests, and every new route added to
+      `PROTECTED` in `test_auth.py`
+
+## Slice 7: The classroom
+
+A teacher opens a room around a quiz, students join with a code, everyone answers at
+once, and the room closes. Contract in [`api.md`](./api.md) under "Slice 7", written
+when this slice starts.
+
+**This is the slice that needs the deploy.** A classroom cannot be demoed on one
+laptop — it needs a teacher on one device and a student on another, against the
+deployed backend. Nothing local proves it works.
+
+### Decided, 2026-09-08, before building
+
+**A room is a three-state machine: `waiting`, `open`, `closed`.** The teacher moves
+it with Start and End. Everything the student screen does is a consequence of which
+state it is in, which keeps "what should be on screen right now" answerable from one
+value rather than from four booleans that can disagree with each other.
+
+**The student screen finds out by asking every three seconds.** A `setInterval`
+inside a `useEffect` whose cleanup clears it. Polling is the boring choice and it is
+the right one here: a websocket is a second protocol, a second failure mode and a
+second thing to explain, to save a couple of seconds in a classroom where nobody is
+racing.
+
+The honest cost: thirty students at one request every three seconds is about ten
+requests a second, against a free Render service with **0.1 of a CPU**. SQLite
+reads are cheap and the poll touches one row, so this should be comfortable — but
+it is unmeasured, and it is the second reason to time things on the real host
+before slice 7 rather than after. If it ever bites, the fix is a longer interval,
+not a websocket.
+
+It also means the room keeps the service awake: Render sleeps a free service after
+15 minutes of no traffic, and a class polling every three seconds is traffic. The
+sleep problem is a before-the-lesson problem, not a during-it one.
+
+**`correct` is stripped for anyone who is not the owner.** The student endpoint
+builds its response field by field — never `dict(row)`, never `SELECT *`. This gets
+its own test, because the failure is invisible: an answer key sitting in a JSON
+response looks completely normal on screen and hands the class the answers.
+
+**Students are signed out when the room closes**, which is what was asked for.
+Stated as a cost rather than discovered as one: it is a real Clerk sign-out, so a
+student who wants to go back to their own notes has to sign in again.
+
+**A student sees "Submitted", not a score.** The mark is computed automatically but
+the teacher can change it in slice 8, and showing a number that later moves is worse
+than showing none. Solo practice is the opposite case and shows the score at once —
+because there, nobody is going to overrule it.
+
+### Checklist
+
+- [ ] `api.md` — the eight room routes, written first
+- [ ] `db.py` — `rooms`, `room_members`, `answers`
+- [ ] `routes.py` — `POST /rooms`, `GET /rooms`, `POST /rooms/{id}/state`,
+      `POST /rooms/join`, `GET /rooms/code/{code}`, `POST /rooms/{id}/answers`
+      _(Fahim, scaffolded)_
+- [ ] Room codes from `secrets`, not `random`, six characters with no `O`/`0` or
+      `I`/`1` in the alphabet — it gets read off a projector and typed
+- [ ] `Landing.jsx` — the two doors, minding the `SignInButton` trap already written
+      up under Slice 5 _(Arman, scaffolded)_
+- [ ] `App.jsx` — the header switch, the teacher's room screen with the code and a
+      live joiner count, Start and End _(Arman, scaffolded)_
+- [ ] The student path: "Join a class", the lobby, the questions, "Submitted", then
+      sign-out — #23 _(Arman, scaffolded; the polling effect's shell and cleanup
+      written out, the fetch inside left as `TODO(Arman)`)_
+- [ ] Tests for the four rules: no answer key to a student, no answering before
+      Start or after End, no answering a room you did not join, 404 for a room that
+      is not yours
+
+## Slice 8: Marking
+
+The teacher reads what came back and decides the marks. Contract in
+[`api.md`](./api.md) under "Slice 8", written when this slice starts.
+
+### Decided, 2026-09-08, before building
+
+**Marks are auto-computed and the teacher can override any of them.** That is the
+answer to "the teacher will judge the submissions and mark them" that costs a
+multiple-choice quiz rather than a written-answer one, and the teacher still has the
+last word on every number.
+
+**`mark` is stored, not derived.** It would be tempting to compute
+`chosen == correct` on the fly and skip the column. The override is why not: the
+moment a teacher changes a mark there are two rules for one number, and every screen
+has to know which one applies. Writing it once at submit time makes the override an
+ordinary `UPDATE`, and "was this changed?" is still answerable by comparing it with
+`chosen == correct` at read time.
+
+**A question most of the class got wrong is flagged.** It is usually a bad question
+rather than a bad class, and that is the most useful thing this screen can tell a
+teacher.
+
+### Checklist
+
+- [ ] `api.md` — `GET /rooms/{id}/results` and `PATCH /rooms/{id}/answers/{aid}`
+- [ ] `routes.py` — both, scoped by `WHERE owner_id = ?` _(Fahim, scaffolded)_
+- [ ] `App.jsx` — the results table, per student and per question, with the override
+      _(Arman, scaffolded)_
+- [ ] The flag for a question most of the room got wrong
 
 ## Not doing right now
 
