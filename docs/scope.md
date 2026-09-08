@@ -67,7 +67,7 @@ already closed.
 | 4.6 | What real use broke   | — (unplanned)             | built, not yet merged   |
 | 5   | Make it Nibble        | Slice 5 — Make it Nibble  | paused — now last       |
 | 6   | Quiz yourself         | Slice 6 — Quiz yourself   | built, not yet merged   |
-| 7   | The classroom         | Slice 7 — The classroom   | open                    |
+| 7   | The classroom         | Slice 7 — The classroom   | built, not yet merged   |
 | 8   | Marking               | Slice 8 — Marking         | open                    |
 
 **Build order is no longer the same as the numbering**, as of 2026-09-08: deploy
@@ -2588,23 +2588,142 @@ because there, nobody is going to overrule it.
 
 ### Checklist
 
-- [ ] `api.md` — the eight room routes, written first
-- [ ] `db.py` — `rooms`, `room_members`, `answers`
-- [ ] `routes.py` — `POST /rooms`, `GET /rooms`, `POST /rooms/{id}/state`,
-      `POST /rooms/join`, `GET /rooms/code/{code}`, `POST /rooms/{id}/answers`
-      _(Fahim, scaffolded)_
-- [ ] Room codes from `secrets`, not `random`, six characters with no `O`/`0` or
+- [x] `api.md` — the eight room routes, written first
+- [x] `db.py` — `rooms`, `room_members`, `answers`
+- [x] `routes.py` — `POST /rooms`, `GET /rooms`, `GET /rooms/{id}`,
+      `POST /rooms/{id}/state`, `DELETE /rooms/{id}`, `POST /rooms/join`,
+      `GET /rooms/code/{code}`, `POST /rooms/{id}/answers` _(Fahim's file —
+      **built, not scaffolded**; see below)_
+- [x] Room codes from `secrets`, not `random`, six characters with no `O`/`0` or
       `I`/`1` in the alphabet — it gets read off a projector and typed
-- [ ] `Landing.jsx` — the two doors, minding the `SignInButton` trap already written
-      up under Slice 5 _(Arman, scaffolded)_
-- [ ] `App.jsx` — the header switch, the teacher's room screen with the code and a
-      live joiner count, Start and End _(Arman, scaffolded)_
-- [ ] The student path: "Join a class", the lobby, the questions, "Submitted", then
-      sign-out — #23 _(Arman, scaffolded; the polling effect's shell and cleanup
-      written out, the fetch inside left as `TODO(Arman)`)_
-- [ ] Tests for the four rules: no answer key to a student, no answering before
+- [x] `Landing.jsx` — the two doors, minding the `SignInButton` trap already written
+      up under Slice 5 _(Arman's area — **built, not scaffolded**)_
+- [x] `App.jsx` — the header switch, the teacher's room screen with the code and a
+      live joiner count, Start and End _(the room screen is `Classroom.jsx`; see
+      below)_
+- [x] The student path: "Join a class", the lobby, the questions, "Submitted", then
+      sign-out — #23 _(`StudentRoom.jsx`)_
+- [x] Tests for the four rules: no answer key to a student, no answering before
       Start or after End, no answering a room you did not join, 404 for a room that
       is not yours
+- [x] `api.js` — one function per route, and the eight added to `PROTECTED` in
+      `test_auth.py`. **310 backend tests pass**, 40 of them new.
+
+### Built, 2026-09-09, and six departures from the plan above
+
+**It was built in full rather than scaffolded, on the tech lead's instruction —
+for the second slice running.** Slice 6 recorded the same override once. Twice is
+a pattern rather than an exception, so it is worth saying plainly: the pull
+request gate is *explain this change in your own words*, and after this slice
+neither Fahim nor Arman has authored anything in `routes.py`, `App.jsx`,
+`Landing.jsx` or the two new components. Either they read these before the PR and
+take them on, or the gate is waived twice. That is a people decision and it is
+now overdue rather than pending.
+
+**Eight routes, and the checklist above named six.** The two added are
+`GET /rooms/{id}` and `DELETE /rooms/{id}`, and both are load-bearing rather than
+tidy: the teacher's screen needs something to poll for the joiner count, and
+without a delete a room list only ever grows and there is no way to take back a
+class opened by mistake. `api.md` said "the eight room routes" from the start;
+the checklist was the half that had not caught up.
+
+**The classroom screens are their own files, not `App.jsx`.** `Classroom.jsx` and
+`StudentRoom.jsx`, the same call slice 6 made for `QuizMe.jsx` and for the same
+reason — `App.jsx` was at 1,104 lines before this. What did land in `App.jsx` is
+the header switch and thirty lines of mounting.
+
+**Asking a room for the state it is already in is a `200`, not a `400`.** This is
+not in the plan above and it should have been. A teacher double-taps Start in
+front of a class; the room is already open; the strict version of "a room only
+moves forward" would put a red sentence on the projector for a press that changed
+nothing and harmed nothing. Backwards is still refused, and that is the move the
+rule exists for — reopening a closed room would let a second paper land against a
+class that is over.
+
+**`page` is stripped from a student's questions as well as `correct`.** The plan
+only named the answer key. A page number is a page of the teacher's note, which
+the student does not have and cannot check, so it buys them nothing and quietly
+says something about somebody else's chapter. Same field-by-field response, one
+more field not in it.
+
+**The sign-out waits four seconds.** "Students are signed out when the room
+closes" is what was asked for and it is what happens — but signing out unmounts
+the whole screen and drops the person on the landing page, so doing it the
+instant the poll reports `closed` means the sentence explaining what happened is
+never read. Four seconds, with a "Sign out now" button for anybody who does not
+want to wait. Written down because it is a softening of the requirement rather
+than an implementation detail.
+
+### Two decisions inside this worth knowing about
+
+**`answers.mark` is written in slice 7 although nothing reads it until slice 8.**
+It looks premature and it is the opposite. Slice 8 lets a teacher override a
+mark, and the moment they can, `chosen == correct` is no longer the answer —
+there would be two rules for one number and every screen would have to know which
+applies. Writing it at submit time makes an override an ordinary `UPDATE`. And
+adding the column later is the expensive move, because `CREATE TABLE IF NOT
+EXISTS` silently will not add a column to a table that already exists, which is
+the whole reason `_check_shape()` exists.
+
+**`rooms.state` has a `CHECK` constraint, the only one in the schema.** Both
+screens in this slice decide what to draw from that one value, so a fourth string
+appearing in that column would break both at once, and no test would necessarily
+catch it. Three states is a small enough list for the database to hold the whole
+rule.
+
+**Which door you came in by lives in `App`, not in `Nibble`.** It has to: signing
+in changes `key` on `<Nibble>`, and React then throws that component away along
+with every piece of state in it — which is the bug that wrapper was added to
+prevent in the first place. A choice made on the landing page, before signing in,
+would go with it. `App` is never unmounted, so the value survives, and it is
+passed back down as a prop.
+
+### Checked by running it, and what that does and does not prove
+
+- **310 backend tests pass**, 40 of them new. The four rules from the plan each
+  have a test, and the answer-key one asserts on the **keys** of the response
+  rather than on a value — the way that rule breaks is a field arriving that
+  nobody meant to send, and `correct != 1` would not notice a `dict(row)`.
+- **The three tables were created against the real `nibble.db`**, the one with
+  four slices of data already in it, with no error. That is the slice 4.5 hazard
+  checked rather than assumed.
+- **The `CHECK` was proved by trying to break it** — an insert with a fourth
+  state is refused by SQLite, not by us remembering to check.
+- **All eight routes answer on a real `uvicorn`**, not just the test client, and
+  they answer `401` without a token in our own sentence. This is the check that
+  would have caught slice 6's "the backend is running an older version" in one
+  step rather than three.
+- Frontend lint and a real `vite build` are both green.
+
+**Not opened in a browser.** Again. The API is proven and the components are
+proven by lint and build, which is not the same claim, and it is the exact gap
+that let slice 4 ship its bugs and that slice 6 also still has open.
+
+### Still needing a person
+
+- [ ] **Merge slice 6 first.** This branch sits on top of `slice-6-quiz-yourself`,
+      because slice 7's tables reference `quizzes` and `questions`. Opened as a PR
+      before slice 6 lands, its diff is two slices and 2,000 lines, which is the
+      review nobody really does.
+- [ ] **A real class, on two devices, against the deployed backend.** A teacher on
+      a laptop and a student on a phone. Nothing on one machine proves this: the
+      whole slice is about two people seeing different things at the same time.
+      This is the slice that needs the deploy, and it is still the only claim that
+      matters.
+- [ ] **Time the poll on Render's 0.1 CPU.** Thirty students at one request every
+      three seconds is about ten a second. The read touches one row and two
+      counts, so it should be comfortable — but "should be" is what slice 4.5 said
+      about upload speed before somebody measured three to four minutes. If it
+      bites, the fix is a bigger `POLL_MS` in `Classroom.jsx`, not a websocket.
+- [ ] **Editing a quiz while a room is running moves the answer key under the
+      class.** `PATCH` on a question does not know a room exists. Storing `mark`
+      at submit time contains the damage — papers already in are marked against
+      the key as it was — but a teacher can still confuse a class mid-quiz.
+      Not fixed, named.
+- [ ] **A refresh loses the student's place.** The code is not remembered
+      anywhere, so reloading returns to the join form and it has to be typed
+      again. Deliberate — the code is on the board in front of them, and storing
+      it would be a fourth place the truth about "which class am I in" lives.
 
 ## Slice 8: Marking
 
