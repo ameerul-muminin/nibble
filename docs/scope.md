@@ -1382,6 +1382,175 @@ rewrite with extra steps.
 - [x] #16 `POST /ask` — search, then answer _(built by Alif; #39 not merged)_
 - [x] #17 Turn the page into a chat with Nibble _(built by Alif)_
 
+## Slice 4.5: Nibble on the internet
+
+A public URL anyone can open: the frontend on Vercel, the backend on a Hugging
+Face Space, and — first, because nothing else is safe without it — real auth on
+every route.
+
+This slice was not in the original plan. It exists because someone asked whether
+Nibble could go on Vercel's free tier, and answering that honestly turned up a
+decision this project had already made and deferred.
+
+### Decided, 2026-09-08 — Vercel cannot host the backend, and that is not a config problem
+
+Vercel hosts the frontend for free and hosts it well. It cannot host this
+backend, for three reasons that are all structural rather than fixable:
+
+- **No disk.** A Vercel function's filesystem is read-only except `/tmp`, which
+  is per-instance and does not survive. `nibble.db` *is* this app's memory. Upload
+  a chapter and the next request can land on an instance that has never seen it.
+  There is no version of this that keeps `sqlite3` and a file on disk, and that
+  file is the whole bet in [`adr/0001-sqlite-and-numpy.md`](./adr/0001-sqlite-and-numpy.md).
+- **Too big.** The Hobby plan caps a Python function at 250 MB unzipped.
+  `fastembed` brings `onnxruntime` and tokenizers with it; add numpy and
+  pypdfium2 and that is gone before the 65 MB model file is counted.
+- **Too slow.** Hobby functions cap at 60 seconds. The first search after any
+  cold start downloads *and* loads the model — so the platform defeats the
+  module-level singleton rule from CLAUDE.md by construction, paying that cost
+  again on every cold start. OCR is worse on purpose: `OCR_MAX_PAGES = 5` at
+  `OCR_RETRY_WAIT_SECONDS = 20` is a deliberately multi-minute upload.
+
+The full reasoning, and why Hugging Face Spaces rather than Render, is in
+[`adr/0003-hosting.md`](./adr/0003-hosting.md).
+
+### The blocker that mattered more than the hosting
+
+The auth decision under Slice 1 said it in one line: **do not deploy this
+anywhere public as it stands.** No route checks who is calling, `documents` has
+no `user_id`, and Clerk gates the UI and nothing else. A public URL without auth
+hands strangers a delete button on your notes.
+
+That decision was made on the explicit condition that nothing is deployed. So
+deploying does not "also need a bit of auth" — it reopens a slice-1 decision, and
+that reopening is most of this slice. The earlier entry deferred auth to protect
+slices 3 and 4; those are now built, which is exactly the condition it named for
+revisiting.
+
+### Decided, 2026-09-08 — how auth is done
+
+- **Clerk verifies, we trust the `sub`.** The frontend already has a Clerk
+  session. It sends the session token as `Authorization: Bearer <token>`, and
+  the backend verifies the signature against Clerk's public keys and reads the
+  `sub` claim. That claim is the user id. We store nothing about a person
+  beyond that opaque string — no email, no name, nothing to leak.
+- **One new dependency, `pyjwt[crypto]`.** `PyJWKClient` fetches and caches
+  Clerk's signing keys. Verifying a JWT by hand is the kind of code that is
+  wrong in ways nobody notices until it matters, and this is the standard tool.
+- **`documents` gets `user_id`; `chunks` does not.** A chunk reaches its owner
+  through `document_id`, which is already indexed and already cascades on
+  delete. A second copy of the same fact is a second thing to keep true.
+- **A note you do not own is a 404, not a 403.** 403 confirms it exists.
+- **`/health` stays open.** The host's health check calls it, and it says
+  nothing about anybody.
+
+### Decided, 2026-09-08 — an old database fails loudly instead of migrating
+
+`CREATE TABLE IF NOT EXISTS` will not add `user_id` to a `documents` table that
+already exists, so an existing `nibble.db` would keep working and quietly ignore
+the new column. That is the silent failure this project keeps trying to avoid.
+
+The options were a migration system or a loud error. We took the loud error:
+`db.py` checks the shape of the table it found and, if it is the old one, raises
+a plain sentence telling you to delete the file. Migrations are a genuinely
+useful idea and a whole new one to explain, the data is a demo database, and the
+deploy target starts empty regardless. If Nibble ever holds notes somebody would
+be upset to lose, this is the decision to revisit first.
+
+### What this costs, stated before the demo rather than during it
+
+- **The database resets.** A free Space has no persistent disk, so `nibble.db`
+  empties whenever the Space restarts or rebuilds. Re-upload your chapter before
+  demoing. This is the ADR-0001 trade showing its edge, and it is the honest
+  answer if someone asks at the demo where the data goes.
+- **Clerk production keys need a domain you control**, and `.vercel.app` is not
+  one. Development keys work on a Vercel URL, with a dev banner and lower rate
+  limits. Fine for a demo; the thing to fix first if Nibble ever gets a real
+  domain.
+- **The first question after a quiet spell is slow.** The Space idles out after
+  48 hours of no traffic and takes a minute to wake. Open the URL before the
+  demo starts.
+- **Everything is still free.** Vercel Hobby, a free CPU Space, Clerk's free
+  tier, and the Groq key we already use. No card anywhere.
+
+### Ownership: this slice crossed every boundary at once
+
+Deploying is not a folder. This slice touches `routes.py` and `tests/` (Fahim),
+`db.py` and `config.py` (Alif), and `api.js` and `App.jsx` (Arman) — and it was
+built by Alif in one pass, because the halves do not work separately: routes
+that demand a token cannot merge before a frontend that sends one.
+
+That is the third slice in a row where the work did not go to the person it was
+assigned to, and this time it was not an accident of who was free. It is
+recorded here rather than smoothed over. Adding auth to a route is a repeating
+pattern over six routes — exactly the shape of task the "don't do the learning
+for them" rule exists to protect, and exactly what was taken away here. If
+slice 5 goes the same way, the problem is the plan, not the week.
+
+### Checklist
+
+- [x] `adr/0003-hosting.md` — why not Vercel, why not Render, why a Space
+- [x] `api.md` — the auth header, and the 401 every protected route can now return
+- [x] `config.py` — `CLERK_ISSUER`, `CORS_ORIGINS` from the environment
+- [x] `auth.py` — verify the token, return the user id
+- [x] `db.py` — `user_id` on `documents`, and the loud error for an old database
+- [x] `routes.py` — six routes scoped to the person calling them
+- [x] `tests/conftest.py` — one signed-in user for every test that had none
+- [x] `api.js` and `App.jsx` — send the token on every request
+- [x] `Dockerfile` — the backend as a Space, with the model baked in
+- [x] `deploying.md` — the steps, for someone who has never deployed anything
+- [x] Lint, format, tests, and the production build, both sides
+
+### Verified by actually running it, 2026-09-08
+
+147 backend tests pass, both linters and both formatters are clean, and the
+frontend production build succeeds. Beyond that, against a real `uvicorn`:
+
+- `GET /health` with no token → `200 {"status":"ok"}`. It has to stay open; the
+  Space's health check calls it.
+- `GET /documents` and `POST /ask` with no token → `401`, with the sentence a
+  person should read rather than a mention of headers.
+- `GET /documents` with `Authorization: Bearer junk` → `401`, and **not** the
+  JWT library's own wording.
+- `CLERK_ISSUER` unset → the backend refuses to start and names the file to copy.
+
+### The bug the run caught, which the tests did not
+
+The old-database guard was written to run *after* `_SCHEMA`, and every test
+passed. Pointing it at the real `backend/nibble.db` — which predates slice 4.5 —
+produced this instead of the friendly sentence:
+
+```
+sqlite3.OperationalError: no such column: user_id
+```
+
+`CREATE INDEX ... ON documents(user_id)` runs as part of the schema and hits the
+missing column before anything gets a chance to explain it. So the check now
+runs *before* the schema, and returns early when `documents` does not exist at
+all, which is a new database rather than an old one.
+
+Worth noting what let this through. Every test builds its database from the
+current schema, so no test had an old-shaped one to find — the check was being
+exercised only in the case it was not written for. The regression test in
+`test_db.py` now creates a slice-1 `documents` table by hand, which is the only
+way to have the thing being guarded against.
+
+This is the second time on this project that a check written for a failure was
+verified only against the success case. It is also exactly the argument for the
+"actually run it" rule in CLAUDE.md: the suite was green and the feature was
+broken for the single database that most matters — the one already on the
+laptop.
+
+### Still needing a person
+
+- [ ] **The actual deploy.** Everything here is verified locally. Nobody has
+      pushed the Space or the Vercel project yet, and a deploy that has not run
+      is a deploy that does not work. [`deploying.md`](./deploying.md) is the
+      script to follow.
+- [ ] **Two accounts, two sets of notes, one deployed backend.** The whole point
+      of this slice. Sign in as one person, upload something, sign in as another
+      in a private window, and confirm the second sees nothing of the first.
+
 ## Slice 5: Make it Nibble
 
 Design system, mascot, voice. Everything here is already decided in

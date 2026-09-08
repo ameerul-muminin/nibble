@@ -8,6 +8,7 @@ having to exist before slice 2 needs it.
 import pytest
 
 from app.db import get_db
+from tests.conftest import TEST_USER_ID
 
 
 @pytest.fixture(autouse=True)
@@ -54,8 +55,8 @@ def test_deleting_a_document_also_deletes_its_chunks():
     db = get_db()
     try:
         cursor = db.execute(
-            "INSERT INTO documents (filename, page_count, created_at) VALUES (?, ?, ?)",
-            ("biology.pdf", 2, "2026-09-06T10:00:00"),
+            "INSERT INTO documents (user_id, filename, page_count, created_at) VALUES (?, ?, ?, ?)",
+            (TEST_USER_ID, "biology.pdf", 2, "2026-09-06T10:00:00"),
         )
         doc_id = cursor.lastrowid
         db.execute(
@@ -90,3 +91,34 @@ def test_a_chunk_cannot_point_at_a_document_that_does_not_exist():
             db.commit()
     finally:
         db.close()
+
+
+def test_a_database_from_before_notes_had_owners_is_refused():
+    """An old nibble.db gets a sentence, not a traceback.
+
+    Slice 4.5 added `user_id` to `documents`, and `CREATE TABLE IF NOT EXISTS`
+    will not add a column to a table that already exists — so a database made
+    before that change survives, with a shape the code no longer matches.
+
+    This is pinned because the first version of the check ran *after* the
+    schema, and the schema hits the problem first: the new index on user_id
+    fails with "no such column", which is exactly the raw exception the project
+    promises never to show anybody. Getting the order wrong again would be
+    invisible without this test, because the database is still refused either
+    way — just uselessly.
+    """
+    import sqlite3
+
+    from app import config
+
+    # A `documents` table exactly as slice 1 wrote it: no user_id.
+    old = sqlite3.connect(config.DATABASE_FILE)
+    old.execute(
+        "CREATE TABLE documents (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "filename TEXT NOT NULL, page_count INTEGER NOT NULL, created_at TEXT NOT NULL)"
+    )
+    old.commit()
+    old.close()
+
+    with pytest.raises(RuntimeError, match="Delete the file"):
+        get_db()

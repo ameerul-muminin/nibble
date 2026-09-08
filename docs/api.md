@@ -11,6 +11,43 @@ backend is running. FastAPI generates it from the code, so it is never out of da
 
 ---
 
+## Authentication — every route below except `GET /health`
+
+From Slice 4.5, the backend knows who is calling and answers only about that
+person's notes. Two people signed into different Clerk accounts share a backend
+and see nothing of each other's.
+
+**The frontend sends the Clerk session token on every request:**
+
+```
+Authorization: Bearer <clerk session token>
+```
+
+`api.js` does this for you — it asks Clerk for a fresh token before each call, so
+no component builds this header by hand. A token is short-lived by design and
+Clerk refreshes it; nothing caches one.
+
+**The backend verifies the signature** against Clerk's public keys and reads the
+`sub` claim. That claim is the user id, and it is the only thing about a person
+this project stores. No email, no name.
+
+Every protected route can therefore return one status that is not listed in its
+own table below:
+
+| Status | When |
+| --- | --- |
+| `401` | No `Authorization` header, or a token that is missing, expired, or not signed by Clerk |
+
+**A note belonging to someone else is a `404`, not a `403`.** `GET
+/documents/4/chunks` and `DELETE /documents/4` both answer "no document with
+that id" whether the id does not exist or simply is not yours. A `403` would
+confirm it exists, which is a thing worth not saying.
+
+`GET /health` is deliberately open. The host's health check calls it, and it says
+nothing about anybody.
+
+---
+
 ## Slice 0 — built
 
 ### `GET /health`

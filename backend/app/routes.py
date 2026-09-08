@@ -20,10 +20,11 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
-from fastapi import APIRouter, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from pydantic import BaseModel
 
 from app import config, llm, ocr
+from app.auth import current_user_id
 from app.chunking import chunk_pages
 from app.db import get_db
 from app.embeddings import EmbeddingUnavailable, cosine_similarity, embed_texts
@@ -94,8 +95,14 @@ def _safe_filename(raw: str | None) -> str:
 
 
 @router.post("/documents", status_code=status.HTTP_201_CREATED)
-async def upload_document(file: UploadFile):
+async def upload_document(file: UploadFile, user_id: str = Depends(current_user_id)):
     """Upload a PDF, TXT, or MD file and save it as a document.
+
+    ``user_id`` is not something the caller sends. ``Depends(current_user_id)``
+    makes FastAPI verify the Clerk token first and hand the route the id inside
+    it — see auth.py. If the token is missing or bad, this function never runs.
+    Every route below does the same thing, and the note is written out once here
+    rather than repeated on each of them.
 
     The route reads the file, validates the extension and size, calls
     extract_text to pull out the words, saves the file to disk, inserts a
@@ -226,8 +233,8 @@ async def upload_document(file: UploadFile):
     db = get_db()
     try:
         cursor = db.execute(
-            "INSERT INTO documents (filename, page_count, created_at) VALUES (?, ?, ?)",
-            (filename, page_count, created_at),
+            "INSERT INTO documents (user_id, filename, page_count, created_at) VALUES (?, ?, ?, ?)",
+            (user_id, filename, page_count, created_at),
         )
         doc_id = cursor.lastrowid
 
@@ -268,12 +275,19 @@ async def upload_document(file: UploadFile):
 
 
 @router.get("/documents")
-def list_documents():
-    """Return every uploaded document, newest first."""
+def list_documents(user_id: str = Depends(current_user_id)):
+    """Return the signed-in person's uploaded documents, newest first.
+
+    "Every uploaded document" until slice 4.5, which is what a shared demo
+    database looked like. The `WHERE` is the whole difference, and it is the
+    reason two people can now use one deployed backend.
+    """
     db = get_db()
     try:
         rows = db.execute(
-            "SELECT id, filename, page_count, created_at FROM documents ORDER BY id DESC"
+            "SELECT id, filename, page_count, created_at FROM documents "
+            "WHERE user_id = ? ORDER BY id DESC",
+            (user_id,),
         ).fetchall()
     finally:
         db.close()
@@ -290,11 +304,17 @@ def list_documents():
 
 
 @router.delete("/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_document(document_id: int):
-    """Delete one document, and the chunks that belong to it.
+def delete_document(document_id: int, user_id: str = Depends(current_user_id)):
+    """Delete one of your own documents, and the chunks that belong to it.
 
     Contract, from docs/api.md: 204 with no body on success, 404 if there is
     no document with that id.
+
+    **Somebody else's note is a 404, not a 403.** The `AND user_id = ?` below
+    makes "does not exist" and "is not yours" the same answer, deliberately. A
+    403 would be more precise and that is exactly the problem: it would confirm
+    that the note exists, which lets anyone with the URL map out what other
+    people have uploaded, one id at a time.
 
     Two things about this route are new. First, `{document_id}` in the path is
     a *path parameter* — FastAPI reads it out of the URL and hands it to this
@@ -327,7 +347,10 @@ def delete_document(document_id: int):
         # would both pass that check, and the loser would delete nothing and
         # still answer 204. Asking the DELETE itself is one statement, so there
         # is no gap in between for anything to change.
-        cursor = db.execute("DELETE FROM documents WHERE id = ?", (document_id,))
+        cursor = db.execute(
+            "DELETE FROM documents WHERE id = ? AND user_id = ?",
+            (document_id, user_id),
+        )
         db.commit()
 
         if cursor.rowcount == 0:
@@ -347,8 +370,8 @@ def delete_document(document_id: int):
 
 
 @router.get("/documents/{document_id}/chunks")
-def list_chunks(document_id: int):
-    """Return the pieces one document was cut into, in reading order.
+def list_chunks(document_id: int, user_id: str = Depends(current_user_id)):
+    """Return the pieces one of your documents was cut into, in reading order.
 
     This endpoint exists mainly so chunking can be *seen*. Everything slice 2
     does happens invisibly inside the upload, and a feature you cannot look at
@@ -371,7 +394,13 @@ def list_chunks(document_id: int):
     """
     db = get_db()
     try:
-        document = db.execute("SELECT id FROM documents WHERE id = ?", (document_id,)).fetchone()
+        # This lookup is what makes the query below safe. Proving the document
+        # is yours here means the chunks SELECT does not need its own ownership
+        # check — the chunks of a document you own are yours by definition.
+        document = db.execute(
+            "SELECT id FROM documents WHERE id = ? AND user_id = ?",
+            (document_id, user_id),
+        ).fetchone()
 
         if document is None:
             raise HTTPException(
@@ -408,8 +437,8 @@ class SearchRequest(BaseModel):
     query: str
 
 
-def _retrieve(query: str) -> tuple[list[dict], list[int]]:
-    """Find the pieces of the notes that mean the closest thing to some text.
+def _retrieve(query: str, user_id: str) -> tuple[list[dict], list[int]]:
+    """Find the pieces of *this person's* notes that mean the closest thing to some text.
 
     **No language model is involved anywhere in here.** This is retrieval on its
     own, and it is worth understanding before reading the ``/ask`` route below:
@@ -442,13 +471,20 @@ def _retrieve(query: str) -> tuple[list[dict], list[int]]:
         # before slice 3 has no vector, and json.loads(None) raises. Skipping
         # those rows is the decision recorded in docs/scope.md — they are not
         # backfilled.
+        # d.user_id = ? is doing something bigger than it looks. Without it,
+        # asking a question searches every note in the database, including other
+        # people's — and because /ask hands what it finds to a model, the answer
+        # would quote them. This one clause is the difference between a shared
+        # demo and a private one.
         rows = db.execute(
             """
             SELECT c.document_id, c.page, c.content, c.embedding, d.filename
             FROM chunks c
             JOIN documents d ON d.id = c.document_id
             WHERE c.embedding IS NOT NULL
-            """
+              AND d.user_id = ?
+            """,
+            (user_id,),
         ).fetchall()
 
         # ...and this is what stops that skip being silent. A note that can
@@ -459,10 +495,24 @@ def _retrieve(query: str) -> tuple[list[dict], list[int]]:
         # The ids rather than a COUNT, because a second kind of unsearchable
         # note is found below and the two sets have to be added together without
         # counting the same note twice.
+        # The same ownership filter as above, and it needs the join to get one:
+        # `chunks` has no user_id of its own, on purpose — it reaches its owner
+        # through the document. Forgetting it here would be quiet and nasty
+        # rather than loud: no other person's *content* would leak, but the
+        # count of "notes Nibble can't search" would include theirs, so the UI
+        # would tell you to go and delete notes that are not yours and that you
+        # cannot see.
         unsearchable_ids = {
             row["document_id"]
             for row in db.execute(
-                "SELECT DISTINCT document_id FROM chunks WHERE embedding IS NULL"
+                """
+                SELECT DISTINCT c.document_id
+                FROM chunks c
+                JOIN documents d ON d.id = c.document_id
+                WHERE c.embedding IS NULL
+                  AND d.user_id = ?
+                """,
+                (user_id,),
             ).fetchall()
         }
     finally:
@@ -535,7 +585,7 @@ def _retrieve(query: str) -> tuple[list[dict], list[int]]:
 
 
 @router.post("/search")
-def search(request: SearchRequest):
+def search(request: SearchRequest, user_id: str = Depends(current_user_id)):
     """Show which pieces of your notes came closest to what you typed.
 
     All of the work is in ``_retrieve`` above. This route exists to make that
@@ -555,7 +605,7 @@ def search(request: SearchRequest):
         )
 
     try:
-        results, unsearchable_note_ids = _retrieve(query)
+        results, unsearchable_note_ids = _retrieve(query, user_id)
     except EmbeddingUnavailable as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -595,7 +645,7 @@ def _excerpt(content: str) -> str:
 
 
 @router.post("/ask")
-def ask(request: AskRequest):
+def ask(request: AskRequest, user_id: str = Depends(current_user_id)):
     """The endpoint the whole project exists for. Search the notes, then answer from them.
 
     This route is deliberately mostly glue, and that is the point of it. It does
@@ -628,7 +678,7 @@ def ask(request: AskRequest):
         )
 
     try:
-        results, _unsearchable = _retrieve(question)
+        results, _unsearchable = _retrieve(question, user_id)
     except EmbeddingUnavailable as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

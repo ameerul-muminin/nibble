@@ -11,7 +11,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useAuth, UserButton } from '@clerk/react'
-import { ask, deleteDocument, getChunks, getHealth, listDocuments, search, uploadDocument } from './api'
+import { ask, deleteDocument, getChunks, getHealth, listDocuments, search, setTokenGetter, uploadDocument } from './api'
 import { Landing } from './components/Landing'
 import './styles/global.css'
 
@@ -47,7 +47,23 @@ const MESSAGES = {
  * that arrives to a component that no longer exists, and React drops it.
  */
 export default function App() {
-  const { userId } = useAuth()
+  const { userId, getToken } = useAuth()
+
+  // Slice 4.5: teach api.js how to get a sign-in token, so every request it
+  // makes carries one. See setTokenGetter in api.js for why it takes the
+  // function rather than a token.
+  //
+  // Done here in the body rather than in a useEffect, and that ordering is the
+  // whole reason. React renders a parent before its children, and runs every
+  // effect only after all of them have rendered — so an effect here would run
+  // AFTER Nibble's effect that loads the notes list, and that first request
+  // would go out with no token and come back 401. Setting it during render
+  // means it is in place before any child exists to ask for it.
+  //
+  // Assigning something outside React during render is normally a thing to
+  // avoid. It is safe here because it is the same value every time and nothing
+  // reads it while rendering.
+  setTokenGetter(getToken)
 
   // ?? 'signed-out' because userId is null when nobody is signed in and
   // undefined while Clerk is still looking. A key of null or undefined is the
