@@ -2230,7 +2230,54 @@ That is a real cost and it is being accepted with eyes open, not overlooked.
       above: the coral-alone error text, the `opacity: 0.45` disabled button, and
       tap targets. The keyboard run-through still needs a person, and `Mascot`'s
       `aria-label` still waits on #19.
-- [ ] **#21 Nibble's voice** — every user-visible string, frontend and backend.
+- [x] **#21 Nibble's voice** — done, and **most of the work was already done**.
+      Slices 6, 7 and 8 wrote their strings in the voice as they went, so the
+      sweep of every user-visible sentence found four things rather than a
+      rewrite. That is the pass being short *because* the voice was applied from
+      the start, the same shape as #20 below.
+
+      **The Slice 0 card is gone and the check is kept.** It only speaks now when
+      the backend is unreachable, above all three doors rather than inside Your
+      notes — a product that announces "backend is up" every time you open it is
+      reporting on itself instead of doing its job, and an unreachable backend is
+      unreachable for a class too. Its old wording told you to run `uvicorn`,
+      which stopped being safe advice the moment Nibble went on the internet.
+
+      **"Check the backend is running" was in three more places**, with the same
+      problem, plus one string that explained the project's own history to a
+      student ("anything uploaded before chunking existed").
+
+      **And the backend was leaking raw exceptions into sentences, in five
+      places.** `files.py` put pypdf's error straight through `detail=str(exc)`;
+      `ocr.py`, `llm.py` and `quiz.py` each interpolated a `requests` error, which
+      carries the URL it was calling. That is CLAUDE.md's "never show a raw
+      exception or provider error to a user", broken by accident rather than by
+      decision, and invisible until you go looking for the strings.
+
+      **The bit worth arguing about is written up below.**
+
+### The status code that earned its place, and where it went instead
+
+Three messages said "the answering service answered with `{status_code}`". A bare
+`404` is no more written for a student than the provider's own body — so it came
+out.
+
+**Except this file records the day that number paid for itself.** Under Slice 4:
+Groq retired the chat model mid-slice, the first real `POST /ask` failed, and
+*"The answering service answered with 404"* pointed straight at the model name.
+It is written up there as one of two things that made it a ten-minute problem
+instead of an afternoon.
+
+So it moves rather than disappears: **off the screen and onto `stderr`**, which
+uvicorn prints in the terminal and Render keeps in its logs. One `print()`, no
+logging framework to explain, and the 404 is still there for whoever is
+debugging. Deleting it outright would have been a tidier diff and a worse
+project.
+
+**Three tests changed with it**, and one of them was asserting the bug.
+`test_a_server_error_does_not_leak_the_providers_own_words` checked that the
+provider's body was absent — and that `"500"` was *present*. It now asserts what
+its own name always claimed.
 
 ### The trap in #18, written down before somebody falls into it
 
@@ -2266,8 +2313,18 @@ was built from the start. What is left:
   with an optional `label` prop for the case where the cat is genuinely carrying
   meaning on its own. Nothing passes it yet, which is the right answer: in every
   place #19 put Nibble, the sentence beside it already says the thing.
-- **The keyboard run-through needs a person.** Unplug the mouse; upload, search,
-  ask and delete. Nothing here can assert that.
+- **The keyboard run-through, signed in, still needs a person.** Unplug the
+  mouse; upload, search, ask and delete.
+
+  **The signed-out half of it is done and did not need one.** Driving the real
+  landing page, all three controls are reachable by Tab in reading order and each
+  shows a visible focus ring. The two in the hero come up **lime** rather than
+  indigo — `.on-dark` overrides the ring colour, because indigo on near-black is
+  a ring you cannot see. That is the kind of thing the rule exists to catch and
+  it only shows up when something actually presses Tab.
+
+  Signing in is what a machine cannot do here, so the app behind Clerk is the
+  part still owed.
 
 ### The two strings in #21 that are not really wording
 

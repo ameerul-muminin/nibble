@@ -21,11 +21,18 @@ import { StudentRoom } from './components/StudentRoom'
 import './styles/global.css'
 import './styles/app.css'
 
-// What we say for each state. Errors tell you what to DO, never just "error".
+/*
+  The one thing worth saying about the backend, and only when it is true.
+
+  There is no `up` or `checking` sentence any more, because there is nothing to
+  say in either case: an app that announces it is working is reporting on itself
+  instead of doing its job. The old wording also assumed a developer at a
+  terminal, which stopped being safe the moment Nibble went on the internet —
+  "run uvicorn" is no help at all to somebody on the deployed site. This covers
+  both without pretending to know which one you are.
+*/
 const MESSAGES = {
-  checking: 'Looking for the backend…',
-  up: 'Backend is up. Nibble is ready to learn.',
-  down: 'Can’t reach the backend. Open a second terminal, go to the backend folder, and run: uvicorn app.main:app --reload',
+  down: 'Nibble can’t reach its notes right now. If you’re running it yourself, start the backend; otherwise give it a minute and reload.',
 }
 
 /**
@@ -618,6 +625,29 @@ function Nibble({ door, onDoor }) {
       </header>
 
       <main className="shell">
+      {/*
+        The health check, without the card it used to live in.
+
+        It was the first thing on the page: a developer's panel headed "Slice 0
+        — is everything talking?", above the thing the product is actually for,
+        telling somebody looking at eight finished slices that slice 1 was next.
+        The check is worth keeping and the card was not.
+
+        So it only speaks when there is something to say. A product that
+        announces "backend is up" every time you open it is reporting on itself
+        rather than doing its job, and the sentence people actually need is the
+        one that appears when it is down. It sits above all three doors, because
+        a backend that is unreachable is unreachable for a class too.
+      */}
+      {status === 'down' && (
+        <p role="status" className="notice-bad" style={{ marginTop: 0 }}>
+          <span className="notice-bad__mark" aria-hidden="true">
+            !
+          </span>
+          {MESSAGES.down}
+        </p>
+      )}
+
       {door === 'teach' && <Classroom />}
       {door === 'join' && <StudentRoom />}
 
@@ -712,7 +742,7 @@ function Nibble({ door, onDoor }) {
         {docsStatus === 'failed' && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--gap)' }}>
             <p style={{ color: 'var(--text-muted)', margin: 0 }}>
-              {docsError || 'Could not load your notes. Check the backend is running.'}
+              {docsError || 'Nibble couldn’t fetch your notes just now. Try again in a moment.'}
             </p>
             <Button
               variant="secondary"
@@ -1151,15 +1181,14 @@ function Nibble({ door, onDoor }) {
               <span className="notice-bad__mark" aria-hidden="true">
                 !
               </span>
-              Could not load the pieces. Check the backend is running, then click the note
-              again.
+              Nibble couldn’t open that note’s pieces. Click the note again in a moment.
             </p>
           )}
 
           {chunksStatus === 'ready' && chunks.length === 0 && (
             <p style={{ color: 'var(--text-muted)', marginBottom: 0 }}>
-              This note has no pieces. Anything uploaded before chunking existed is like
-              this — delete it and upload it again.
+              This note has no pieces — it was added before Nibble could read it properly.
+              Delete it and upload it again.
             </p>
           )}
 
@@ -1204,25 +1233,6 @@ function Nibble({ door, onDoor }) {
         </section>
       )}
 
-      {/*
-        The health check, moved out of first position.
-
-        It used to be the first card on the page — a developer's panel sitting
-        above the thing the product is for, telling somebody looking at eight
-        finished slices that slice 1 is next. The check itself is worth keeping;
-        being the first thing anybody reads was not. #21 still owes it a rewrite.
-      */}
-      <section className="card">
-        <h2 style={{ marginBottom: 'var(--gap-sm)' }}>Slice 0 — is everything talking?</h2>
-
-        <p style={{ margin: 0 }}>{MESSAGES[status]}</p>
-
-        <p style={{ marginBottom: 0, color: 'var(--text-muted)' }}>
-          {status === 'up'
-            ? 'Next up: Slice 1, uploading a PDF.'
-            : 'This page asks the backend for /health when it loads.'}
-        </p>
-      </section>
         </div>
         </div>
       )}

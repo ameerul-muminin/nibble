@@ -26,6 +26,7 @@ searching, answering — carries on without knowing any of this happened.
 """
 
 import base64
+import sys
 import time
 from io import BytesIO
 
@@ -156,7 +157,13 @@ def _request_transcription(png_bytes: bytes) -> str:
             timeout=_TIMEOUT_SECONDS,
         )
     except requests.RequestException as exc:
-        raise OcrUnavailable(f"Could not reach the reading service: {exc}") from exc
+        # Not `{exc}`: a requests error carries the URL it was calling and
+        # whatever the network layer had to say, none of it written for a
+        # student. The cause stays on the traceback via `from exc`.
+        print(f"[ocr] could not reach the reading service: {exc}", file=sys.stderr)
+        raise OcrUnavailable(
+            "Nibble couldn't reach the service that reads handwriting. Try again in a moment."
+        ) from exc
 
     if response.status_code == 429:
         # 429 covers both "too many just now" and "nothing left today", and the
@@ -174,7 +181,11 @@ def _request_transcription(png_bytes: bytes) -> str:
     if not response.ok:
         # Deliberately not passing the provider's message through — it is not
         # written for a student and can contain internals.
-        raise OcrUnavailable(f"The reading service answered with {response.status_code}.")
+        print(f"[ocr] the reading service returned {response.status_code}", file=sys.stderr)
+        raise OcrUnavailable(
+            "The service that reads handwriting isn't answering properly just now. "
+            "Try again in a few minutes."
+        )
 
     try:
         return _strip_thinking(response.json()["choices"][0]["message"]["content"])

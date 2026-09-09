@@ -346,7 +346,7 @@ export function Classroom() {
           </span>
           <span>
             <strong>Problem:</strong>{' '}
-            {listError || 'Could not load your classes. Check the backend is running.'}
+            {listError || 'Nibble couldn’t fetch your classes just now. Try again in a moment.'}
           </span>
         </p>
       )}

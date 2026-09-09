@@ -26,6 +26,7 @@ Three things, in the order they are used:
 """
 
 import json
+import sys
 
 import requests
 
@@ -252,7 +253,11 @@ def make_questions(context: str, count: int, pages: set[int]) -> list[dict]:
         )
 
     if not response.ok:
-        raise QuizUnavailable(f"The question writer answered with {response.status_code}.")
+        print(f"[quiz] the question writer returned {response.status_code}", file=sys.stderr)
+        raise QuizUnavailable(
+            "The service that writes questions isn't answering properly just now. "
+            "Try again in a few minutes."
+        )
 
     try:
         raw = response.json()["choices"][0]["message"]["content"]
@@ -322,7 +327,10 @@ def _ask(context: str, count: int):
             timeout=_TIMEOUT_SECONDS,
         )
     except requests.RequestException as exc:
-        raise QuizUnavailable(f"Could not reach the question writer: {exc}") from exc
+        print(f"[quiz] could not reach the question writer: {exc}", file=sys.stderr)
+        raise QuizUnavailable(
+            "Nibble couldn't reach the service that writes questions. Try again in a moment."
+        ) from exc
 
 
 def _validate(raw: str, pages: set[int]) -> list[dict]:

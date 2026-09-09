@@ -42,7 +42,15 @@ def extract_text(data: bytes, filename: str) -> list[tuple[int, str]]:
         try:
             reader = PdfReader(BytesIO(data))
         except Exception as e:
-            raise ValueError(f"Could not read PDF file '{filename}': {e}") from e
+            # Whatever pypdf says here is written for whoever is debugging
+            # pypdf. It went straight through routes.py into a sentence a
+            # student reads, which is the rule in CLAUDE.md about never showing
+            # a raw exception, broken by accident. `from e` keeps the real cause
+            # attached to the traceback for anybody reading a server log.
+            raise ValueError(
+                f"Nibble couldn't open '{filename}'. It may be damaged or "
+                "password-protected — try re-saving it and uploading again."
+            ) from e
 
         pages: list[tuple[int, str]] = []
         for page_num, page in enumerate(reader.pages, start=1):
