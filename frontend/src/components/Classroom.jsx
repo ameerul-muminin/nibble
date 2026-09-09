@@ -220,10 +220,17 @@ export function Classroom() {
         </p>
 
         {notice && (
-          <p style={{ color: 'var(--coral)' }}>
-            {/* The word matters: coral alone carries the meaning by colour, which
-                design.md forbids. */}
-            <strong>Problem:</strong> {notice}
+          /* The word matters: coral alone carries the meaning by colour, which
+             design.md forbids. The mark is the same point made twice over, and
+             it is what lets the sentence itself stay ink — coral text is about
+             3.2:1 on white, under the floor. See .notice-bad in global.css. */
+          <p className="notice-bad">
+            <span className="notice-bad__mark" aria-hidden="true">
+              !
+            </span>
+            <span>
+              <strong>Problem:</strong> {notice}
+            </span>
           </p>
         )}
 
@@ -322,17 +329,27 @@ export function Classroom() {
       </p>
 
       {notice && (
-        <p style={{ color: 'var(--coral)' }}>
-          <strong>Problem:</strong> {notice}
+        <p className="notice-bad">
+          <span className="notice-bad__mark" aria-hidden="true">
+            !
+          </span>
+          <span>
+            <strong>Problem:</strong> {notice}
+          </span>
         </p>
       )}
 
       {listStatus === 'loading' && <p style={{ color: 'var(--text-muted)' }}>Loading…</p>}
 
       {listStatus === 'failed' && (
-        <p style={{ color: 'var(--coral)' }}>
-          <strong>Problem:</strong>{' '}
-          {listError || 'Could not load your classes. Check the backend is running.'}
+        <p className="notice-bad">
+          <span className="notice-bad__mark" aria-hidden="true">
+            !
+          </span>
+          <span>
+            <strong>Problem:</strong>{' '}
+            {listError || 'Could not load your classes. Check the backend is running.'}
+          </span>
         </p>
       )}
 

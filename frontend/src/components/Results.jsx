@@ -244,8 +244,13 @@ export function Results({ roomId }) {
 
   if (status === 'failed') {
     return (
-      <p style={{ color: 'var(--coral)' }}>
-        <strong>Problem:</strong> {error || 'Could not load this class.'}
+      <p className="notice-bad">
+        <span className="notice-bad__mark" aria-hidden="true">
+          !
+        </span>
+        <span>
+          <strong>Problem:</strong> {error || 'Could not load this class.'}
+        </span>
       </p>
     )
   }
@@ -280,8 +285,13 @@ export function Results({ roomId }) {
       </p>
 
       {notice && (
-        <p style={{ color: 'var(--coral)' }}>
-          <strong>Problem:</strong> {notice}
+        <p className="notice-bad">
+          <span className="notice-bad__mark" aria-hidden="true">
+            !
+          </span>
+          <span>
+            <strong>Problem:</strong> {notice}
+          </span>
         </p>
       )}
 

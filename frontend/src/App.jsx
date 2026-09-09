@@ -17,6 +17,7 @@ import { Landing } from './components/Landing'
 import { QuizMe } from './components/QuizMe'
 import { StudentRoom } from './components/StudentRoom'
 import './styles/global.css'
+import './styles/app.css'
 
 // What we say for each state. Errors tell you what to DO, never just "error".
 const MESSAGES = {
@@ -542,7 +543,7 @@ function Nibble({ door, onDoor }) {
   // looks broken. It is normally too fast to read.
   if (!isLoaded) {
     return (
-      <main style={{ maxWidth: 620, margin: '0 auto', padding: 'var(--gap-xl) var(--gap-lg)' }}>
+      <main className="shell">
         <p style={{ color: 'var(--text-muted)' }}>Waking Nibble up…</p>
       </main>
     )
@@ -555,27 +556,28 @@ function Nibble({ door, onDoor }) {
   }
 
   return (
-    <main style={{ maxWidth: 620, margin: '0 auto', padding: 'var(--gap-xl) var(--gap-lg)' }}>
-      <header
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 'var(--gap)',
-          marginBottom: 'var(--gap-lg)',
-        }}
-      >
-        <div>
-          <h1>Nibble</h1>
-          <p style={{ margin: 0, color: 'var(--text-muted)' }}>
-            Bite-sized answers from your own notes
-          </p>
-        </div>
+    <>
+      {/*
+        The black band, straight off the deck's cover slide: near-black, the
+        word in lime, one thin line of what this is.
 
-        {/* Already inside signed-in, so just the user menu. */}
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 'var(--gap-sm)' }}>
-          <UserButton />
+        It sits outside <main> rather than inside it because it runs the full
+        width of the window while everything else is held to a 1200px column.
+        `.on-dark` is what makes the buttons inside it press against a light
+        edge instead of an invisible ink one — see global.css.
+      */}
+      <header className="topbar on-dark">
+        <div className="topbar__inner">
+          <div>
+            <h1 className="topbar__word">Nibble</h1>
+            <p className="topbar__tagline">Bite-sized answers from your own notes</p>
+          </div>
+
+          {/* Already inside signed-in, so just the user menu. */}
+          <div className="topbar__user">
+            <UserButton />
+          </div>
         </div>
-      </header>
 
       {/*
         Slice 7 — the switch between the three screens.
@@ -588,45 +590,39 @@ function Nibble({ door, onDoor }) {
         Real buttons, so Tab and Enter work for free, and aria-pressed says which
         one you are on rather than leaving the lime background to say it alone.
       */}
-      <nav
-        aria-label="Screens"
-        style={{ display: 'flex', gap: 'var(--gap-sm)', marginBottom: 'var(--gap-lg)', flexWrap: 'wrap' }}
-      >
-        {[
-          ['notes', 'Your notes'],
-          ['teach', 'Teach a class'],
-          ['join', 'Join a class'],
-        ].map(([name, label]) => (
-          <button
-            key={name}
-            type="button"
-            className={door === name ? 'btn btn--primary' : 'btn btn--secondary'}
-            aria-pressed={door === name}
-            onClick={() => onDoor(name)}
-          >
-            {label}
-          </button>
-        ))}
-      </nav>
+        <nav aria-label="Screens" className="topbar__nav">
+          {[
+            ['notes', 'Your notes'],
+            ['teach', 'Teach a class'],
+            ['join', 'Join a class'],
+          ].map(([name, label]) => (
+            <button
+              key={name}
+              type="button"
+              className={door === name ? 'btn btn--primary' : 'btn btn--secondary'}
+              aria-pressed={door === name}
+              onClick={() => onDoor(name)}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+      </header>
 
+      <main className="shell">
       {door === 'teach' && <Classroom />}
       {door === 'join' && <StudentRoom />}
 
       {door === 'notes' && (
-        <>
-        {/* Everything below here is Your notes: slices 0 through 6. */}
+        <div className="notes-grid">
+        {/*
+          Everything below here is Your notes: slices 0 through 6.
 
-      <section className="card">
-        <h2 style={{ marginBottom: 'var(--gap-sm)' }}>Slice 0 — is everything talking?</h2>
-
-        <p style={{ margin: 0 }}>{MESSAGES[status]}</p>
-
-        <p style={{ marginBottom: 0, color: 'var(--text-muted)' }}>
-          {status === 'up'
-            ? 'Next up: Slice 1, uploading a PDF.'
-            : 'This page asks the backend for /health when it loads.'}
-        </p>
-      </section>
+          Two columns on a laptop, stacked on anything smaller. Asking and
+          searching are the things you came to do, so they get the wider column;
+          the notes they draw from sit beside them instead of a scroll away.
+        */}
+        <div className="notes-col">
 
       {/*
         Slice 4 — issue #17. The actual product.
@@ -636,7 +632,7 @@ function Nibble({ door, onDoor }) {
         retrieval on its own, with no model near it, is what makes the answer up
         here believable rather than magic.
       */}
-      <section className="card" style={{ marginTop: 'var(--gap-lg)' }}>
+      <section className="card">
         <h2 style={{ marginBottom: 'var(--gap-sm)' }}>Ask Nibble</h2>
 
         <p style={{ marginTop: 0, color: 'var(--text-muted)' }}>
@@ -709,7 +705,7 @@ function Nibble({ door, onDoor }) {
           </div>
         )}
 
-        <form onSubmit={handleAsk} style={{ display: 'flex', gap: 'var(--gap-sm)' }}>
+        <form onSubmit={handleAsk} className="form-row">
           {/* A real label, hidden from sight but not from a screen reader. */}
           <label htmlFor="ask-box" className="visually-hidden">
             What do you want to ask Nibble?
@@ -743,7 +739,12 @@ function Nibble({ door, onDoor }) {
           )}
 
           {askStatus === 'failed' && (
-            <p style={{ color: 'var(--coral)', marginBottom: 0 }}>{askError}</p>
+            <p className="notice-bad" style={{ marginBottom: 0 }}>
+              <span className="notice-bad__mark" aria-hidden="true">
+                !
+              </span>
+              {askError}
+            </p>
           )}
         </div>
       </section>
@@ -756,7 +757,7 @@ function Nibble({ door, onDoor }) {
         which is exactly what makes this slice worth demoing on its own — and
         what shows where the answer above actually came from.
       */}
-      <section className="card" style={{ marginTop: 'var(--gap-lg)' }}>
+      <section className="card">
         <h2 style={{ marginBottom: 'var(--gap-sm)' }}>Search your notes</h2>
 
         <p style={{ marginTop: 0, color: 'var(--text-muted)' }}>
@@ -764,7 +765,7 @@ function Nibble({ door, onDoor }) {
           cross a membrane” finds the page about osmosis.
         </p>
 
-        <form onSubmit={handleSearch} style={{ display: 'flex', gap: 'var(--gap-sm)' }}>
+        <form onSubmit={handleSearch} className="form-row">
           {/*
             A real <label>, hidden from sight but not from a screen reader. A
             placeholder is not a label: it disappears the moment you type, and
@@ -803,7 +804,12 @@ function Nibble({ door, onDoor }) {
           )}
 
           {searchStatus === 'failed' && (
-            <p style={{ color: 'var(--coral)' }}>{searchError}</p>
+            <p className="notice-bad">
+              <span className="notice-bad__mark" aria-hidden="true">
+                !
+              </span>
+              {searchError}
+            </p>
           )}
 
           {searchStatus === 'ready' && results.length === 0 && (
@@ -883,11 +889,32 @@ function Nibble({ door, onDoor }) {
       </section>
 
       {/*
+        Slice 6 — quiz yourself.
+
+        Under asking and searching, because all three are things you do to a
+        note. It is made FROM a note, so you have to have one before it does
+        anything, and the empty state says so rather than offering a form that
+        cannot work.
+
+        `docs` is passed down rather than fetched again, so the note dropdown
+        and the notes list can never disagree about what exists. onNoteGone lets
+        the quiz card tell App that a note turned out to be too old to quiz —
+        the one failure whose fix is deleting and re-uploading it — and it
+        reuses the same reloadKey the "Try again" button uses rather than adding
+        a second way to refresh the same list.
+      */}
+      <QuizMe docs={docs} onNoteGone={() => setReloadKey((n) => n + 1)} />
+
+        </div>
+
+        <div className="notes-col">
+
+      {/*
         Slice 1 — your notes. Issues #5 (list and upload) and #7 (delete).
         The layout, classes and file-input plumbing are built; the behaviour
         is marked TODO in the handlers above.
       */}
-      <section className="card" style={{ marginTop: 'var(--gap-lg)' }}>
+      <section className="card">
         <div
           style={{
             display: 'flex',
@@ -1052,27 +1079,11 @@ function Nibble({ door, onDoor }) {
 
         Rendered only when something is selected, so the very first thing anyone
       {/*
-        Slice 6 — quiz yourself.
-
-        Below the notes list because it is made FROM a note: you have to have
-        one before this does anything, and the empty state says so rather than
-        offering a form that cannot work.
-
-        `docs` is passed down rather than fetched again, so the note dropdown
-        and the notes list can never disagree about what exists. onNoteGone lets
-        the quiz card tell App that a note turned out to be too old to quiz —
-        the one failure whose fix is deleting and re-uploading it — and it
-        reuses the same reloadKey the "Try again" button uses rather than adding
-        a second way to refresh the same list.
-      */}
-      <QuizMe docs={docs} onNoteGone={() => setReloadKey((n) => n + 1)} />
-
-      {/*
         sees is still the notes list and not an empty panel asking to be filled.
         Plain boxes for now: a page number and the text. Slice 5 makes it pretty.
       */}
       {selectedId !== null && (
-        <section className="card" style={{ marginTop: 'var(--gap-lg)' }}>
+        <section className="card">
           <div
             style={{
               display: 'flex',
@@ -1160,8 +1171,30 @@ function Nibble({ door, onDoor }) {
           )}
         </section>
       )}
-        </>
+
+      {/*
+        The health check, moved out of first position.
+
+        It used to be the first card on the page — a developer's panel sitting
+        above the thing the product is for, telling somebody looking at eight
+        finished slices that slice 1 is next. The check itself is worth keeping;
+        being the first thing anybody reads was not. #21 still owes it a rewrite.
+      */}
+      <section className="card">
+        <h2 style={{ marginBottom: 'var(--gap-sm)' }}>Slice 0 — is everything talking?</h2>
+
+        <p style={{ margin: 0 }}>{MESSAGES[status]}</p>
+
+        <p style={{ marginBottom: 0, color: 'var(--text-muted)' }}>
+          {status === 'up'
+            ? 'Next up: Slice 1, uploading a PDF.'
+            : 'This page asks the backend for /health when it loads.'}
+        </p>
+      </section>
+        </div>
+        </div>
       )}
     </main>
+    </>
   )
 }

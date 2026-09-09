@@ -12,17 +12,32 @@
   --indigo-deep: #3a3ac4;
   --mint: #4fde82;
   --coral: #f26b3d;
+  --lilac: #c6a5df;
 
-  /* Surfaces */
+  /* Surfaces.
+
+     The deck is two slides alternating: a near-black one and a pale green one,
+     with white pill-shaped cards sitting on top. That is what these are.
+
+     --page and --haze are the same green on purpose. It is one colour with two
+     jobs — the slide, and the chip that sits on a white card in front of it. If
+     a chip ever has to sit directly on the page they part company here, and in
+     no other file. */
   --paper: #ffffff;
   --cream: #fdf6e3;
   --haze: #eaf4d5;
-  --page: #fbfbf7;
+  --page: #eaf4d5;
+  --ink-surface: #0f0f0f;
 
   /* Text */
   --text: #0a0a0a;
   --text-muted: #5c5c50;
   --text-faint: #9a9a9a;
+
+  /* Text on the black band. Ink is unreadable there, so the dark surface
+     carries its own pair rather than every dark block guessing one. */
+  --on-ink: #fbfbf7;
+  --on-ink-muted: #b7bfa9;
 
   /* Shape — chunky and friendly, never sharp */
   --radius-sm: 10px;

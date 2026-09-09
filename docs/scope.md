@@ -2079,6 +2079,44 @@ nothing anybody can see.
 
 So slice 5 is four narrow things, in files that mostly already look right.
 
+### That reasoning was right and then stopped being right, 2026-09-09
+
+**The paragraph above says do not pull the inline styles out of `App.jsx`, and it
+was correct for exactly as long as nothing needed a breakpoint.** It is left
+standing rather than deleted, because the way it stopped being true is the useful
+part.
+
+Its argument was that moving `display: flex` into a stylesheet buys nothing
+anybody can see. True — while every screen gets the same layout. The moment the
+app has to lay itself out differently on a phone and on a laptop, it is no longer
+a matter of taste: **an inline style cannot hold a media query.** There is nowhere
+in `style={{ ... }}` to write "and at 1024px, two columns". The browser has no
+syntax for it.
+
+So the rule got narrower rather than reversed, and it is now in
+[`design.md`](./design.md) in one line: **anything that has to answer to a
+breakpoint lives in a stylesheet; anything that does not can stay inline.** Most
+of `App.jsx`'s inline styles still do not, and they were left exactly where they
+were. What moved is the page shell, the two columns, and the two forms.
+
+### And the deck recolour, which turned out not to be a recolour
+
+Asked to "take the colours from the pitch deck", the first finding was that
+`tokens.css` already had them — lime, indigo, mint and coral match the deck, and
+`--haze #EAF4D5` **is** the deck's pale green slide. The accents were never the
+gap.
+
+**The gap was the surfaces.** The deck is two slides alternating, near-black and
+pale green, with white pill cards on top; the app was off-white everywhere. So the
+change is `--page` becoming the deck's green, a black band across the top carrying
+the word in lime, and the landing hero becoming the cover slide. Three colours were
+genuinely missing and are now tokens: `--ink-surface`, `--on-ink` and its muted
+pair, plus `--lilac` held in reserve.
+
+The detail that is easy to miss and looks broken when it is missed: **the solid
+press edge under a button has to flip from ink to light on a dark block**, or the
+signature simply vanishes. That is what `.on-dark` in `global.css` is for.
+
 **`Mascot.jsx` is imported by nothing.** That is the finding that made this slice
 concrete. It was written in the rebuild, it takes a `mood` prop, it has a bob
 animation — and no file anywhere imports it. `Landing.jsx` draws Nibble with a
@@ -2141,7 +2179,18 @@ That is a real cost and it is being accepted with eyes open, not overlooked.
 - [ ] **#19 Nibble's moods, empty states and loading states** — `happy` and
       `curious` on `Mascot`, then Nibble in the header, in both empty states,
       thinking while an answer is in flight, and happy beside the newest answer.
+- [x] **`feat/deck-colours-and-responsive`** — the deck's surfaces, and the
+      responsive pass the app had never had. The signed-in app was a 620px ribbon
+      at every width, so a laptop showed two thirds empty page with the notes list
+      a full scroll below the question box. It is now two columns above 1024px —
+      asking, searching and quizzing on the left, the notes they draw from on the
+      right — one column below it, and forms that stack rather than squash on a
+      phone. Two breakpoints in the whole app, 640 and 1024, and no more.
 - [ ] **#20 Accessibility pass** — the gaps that are actually left, listed below.
+      **Three of the four bullets below are now done**, in the two pull requests
+      above: the coral-alone error text, the `opacity: 0.45` disabled button, and
+      tap targets. The keyboard run-through still needs a person, and `Mascot`'s
+      `aria-label` still waits on #19.
 - [ ] **#21 Nibble's voice** — every user-visible string, frontend and backend.
 
 ### The trap in #18, written down before somebody falls into it
