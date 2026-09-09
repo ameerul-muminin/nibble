@@ -186,3 +186,60 @@
   width: auto;
   flex-shrink: 0;
 }
+
+/* ---------- The hero is the deck's cover slide ---------- */
+
+/* Black, a white headline, the pitch in a lime pill. `.on-dark` in global.css
+   carries the surface colour and the press edge; everything here is the parts
+   of the hero that have to change to sit on it. */
+
+.landing-hero .landing-sub {
+  display: inline-block;
+  margin: 0 0 var(--gap) 0;
+  padding: var(--gap-sm) var(--gap);
+  background: var(--lime);
+  color: var(--ink);
+  border: var(--border);
+  border-radius: var(--radius-pill);
+  font-size: 17px;
+}
+
+.landing-hero .landing-micro {
+  color: var(--on-ink-muted);
+}
+
+/* ---------- Phone ---------- */
+
+/* 720px already turns the hero and the steps into one column. This is the
+   narrower case: a phone, where the page padding itself is the thing eating
+   the screen. */
+
+@media (max-width: 640px) {
+  .landing {
+    padding: var(--gap-lg) var(--gap);
+    gap: var(--gap);
+  }
+
+  .landing-hero-copy h1 {
+    font-size: 28px;
+  }
+
+  .landing-hero-art {
+    height: 140px;
+  }
+
+  /* A pill radius on a five-line block is an ellipse, not a bubble. The deck's
+     is a pill because the line it holds is two lines long. */
+  .landing-hero .landing-sub {
+    border-radius: var(--radius-lg);
+  }
+
+  .landing-cta .btn {
+    width: 100%;
+  }
+
+  .landing-cta-big {
+    font-size: 16px;
+    padding: 14px 20px;
+  }
+}

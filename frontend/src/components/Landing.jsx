@@ -68,7 +68,13 @@ export function Landing({ onDoor }) {
       </header>
 
       <main className="landing-main">
-        <section className="card landing-hero">
+        {/*
+          The deck's cover slide, as a card: near-black, a big white headline,
+          and the one-line pitch in a lime pill. `on-dark` is what flips the
+          buttons' press edge from ink to light so it is visible against it —
+          see global.css.
+        */}
+        <section className="card landing-hero on-dark">
           <div className="landing-hero-mascot">
             <img
               src="/wave-nibble.svg"

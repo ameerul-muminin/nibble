@@ -215,9 +215,16 @@ export function StudentRoom() {
   // ---------------------------------------------------------------------------
 
   const problem = notice && (
-    <p style={{ color: 'var(--coral)' }}>
-      {/* The word, not just the colour — design.md forbids meaning by colour alone. */}
-      <strong>Problem:</strong> {notice}
+    /* The word, not just the colour — design.md forbids meaning by colour alone.
+       The sentence stays ink because coral text is about 3.2:1 on white, under
+       the 4.5:1 floor; the coral lives in the mark instead. */
+    <p className="notice-bad">
+      <span className="notice-bad__mark" aria-hidden="true">
+        !
+      </span>
+      <span>
+        <strong>Problem:</strong> {notice}
+      </span>
     </p>
   )
 
@@ -231,10 +238,7 @@ export function StudentRoom() {
 
         {problem}
 
-        <form
-          onSubmit={handleJoin}
-          style={{ display: 'flex', gap: 'var(--gap-sm)', flexWrap: 'wrap' }}
-        >
+        <form onSubmit={handleJoin} className="form-row">
           <label className="visually-hidden" htmlFor="class-code">
             Class code
           </label>

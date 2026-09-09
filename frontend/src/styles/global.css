@@ -54,6 +54,10 @@ h3 {
   font-weight: 600;
   letter-spacing: 0.01em;
   padding: 12px 22px;
+  /* A finger is about 44px across, and that is the floor a tap target has to
+     clear. The padding above already gets there on its own; this is here so it
+     stays true when somebody makes a small variant later. */
+  min-height: 44px;
   border: var(--border);
   border-radius: var(--radius);
   box-shadow: var(--lift);
@@ -66,8 +70,14 @@ h3 {
   box-shadow: 0 0 0 var(--ink);
 }
 
+/* Disabled used to be `opacity: 0.45`, which fades the text along with the
+   background — ink on lime at 45% is under the 4.5:1 floor, and the Ask button
+   spends every slow answer in that state. A drained background with the text
+   left alone says the same thing and stays readable. */
+
 .btn:disabled {
-  opacity: 0.45;
+  background: var(--haze);
+  color: var(--text-muted);
   cursor: not-allowed;
   box-shadow: var(--lift);
 }
@@ -220,4 +230,52 @@ h3 {
   font-weight: 600;
   font-size: 15px;
   line-height: 1;
+}
+
+/* ---------- On the black band ---------- */
+
+/* The press signature is a solid edge underneath a control. On a pale page that
+   edge is ink; on the deck's black it would be invisible, so it flips to the
+   light. Same signature, same 4px, still lands on its own shadow when pressed. */
+
+.on-dark {
+  background: var(--ink-surface);
+  color: var(--on-ink);
+}
+
+.on-dark .btn {
+  box-shadow: 0 4px 0 var(--on-ink);
+}
+
+.on-dark .btn:active:not(:disabled) {
+  box-shadow: 0 0 0 var(--on-ink);
+}
+
+.on-dark :focus-visible {
+  outline-color: var(--lime);
+}
+
+/* ---------- Small screens ---------- */
+
+/* One breakpoint for the pieces themselves. Everything about *where things sit*
+   lives in app.css instead; this block is only the things that are too big for a
+   phone at the size they were drawn for a laptop. */
+
+@media (max-width: 640px) {
+  h1 {
+    font-size: 28px;
+  }
+  h2 {
+    font-size: 21px;
+  }
+
+  .card {
+    padding: var(--gap);
+    border-radius: var(--radius);
+  }
+
+  /* A bubble capped at 78% wastes a fifth of a phone screen on nothing. */
+  .bubble {
+    max-width: 92%;
+  }
 }

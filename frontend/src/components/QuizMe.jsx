@@ -294,7 +294,7 @@ export function QuizMe({ docs, onNoteGone }) {
     : 0
 
   return (
-    <section className="card" style={{ marginTop: 'var(--gap-lg)' }}>
+    <section className="card">
       <h2 style={{ marginBottom: 'var(--gap-sm)' }}>Quiz me</h2>
       <p style={{ color: 'var(--text-muted)', marginTop: 0 }}>
         Nibble writes questions from one of your notes, and tells you which page each
@@ -302,7 +302,10 @@ export function QuizMe({ docs, onNoteGone }) {
       </p>
 
       {notice && (
-        <p role="status" style={{ color: 'var(--coral)' }}>
+        <p role="status" className="notice-bad">
+          <span className="notice-bad__mark" aria-hidden="true">
+            !
+          </span>
           {notice}
         </p>
       )}

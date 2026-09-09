@@ -1,0 +1,150 @@
+/* The signed-in app's layout.
+ *
+ * Why this file exists, when App.jsx already styles itself inline:
+ *
+ * an inline style cannot hold a media query. There is nowhere in
+ * `style={{ ... }}` to say "and at 1024px, two columns" — the browser has no
+ * way to express it. Every inline style in App.jsx that never needs to change
+ * with the screen has been left exactly where it is; what moved here is only
+ * what has to answer to a breakpoint.
+ *
+ * There are two breakpoints in the whole app and no more:
+ *
+ *   640px and below — a phone. One column, tighter padding, forms stack.
+ *   1024px and up   — a laptop. Two columns.
+ *   between them    — a tablet. One column at comfortable width.
+ *
+ * Everything is written mobile-first: the plain rule is the phone, and the
+ * media queries add to it. That is why you will not find `max-width` doing the
+ * heavy lifting below.
+ */
+
+/* ---------- The black band ---------- */
+
+/* The deck opens on a black slide with the word in lime. This is that slide,
+   full width, with the page's pale green starting underneath it.
+
+   It is outside `.shell` on purpose: the band runs edge to edge, and only the
+   things *inside* it are held to the same 1200px column as the rest. */
+
+.topbar {
+  border-bottom: var(--border);
+}
+
+.topbar__inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: var(--gap) var(--gap-lg);
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+  flex-wrap: wrap;
+}
+
+.topbar__word {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 28px;
+  line-height: 1.1;
+  color: var(--lime);
+}
+
+.topbar__tagline {
+  margin: 0;
+  color: var(--on-ink-muted);
+  font-size: 15px;
+}
+
+.topbar__user {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+}
+
+.topbar__nav {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 var(--gap-lg) var(--gap);
+  display: flex;
+  gap: var(--gap-sm);
+  flex-wrap: wrap;
+}
+
+/* ---------- The page column ---------- */
+
+.shell {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: var(--gap-lg) var(--gap);
+}
+
+/* ---------- Your notes: one column, then two ---------- */
+
+/* Two real wrapper divs rather than clever grid placement. Auto-placement can
+   be told to put the third child in the second column, but then the first
+   column has a hole in it where the third child would have gone, and working
+   out why costs more than the two divs are worth. */
+
+.notes-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-lg);
+  align-items: start;
+}
+
+.notes-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-lg);
+  min-width: 0;
+  width: 100%;
+}
+
+/* ---------- A control and its button ---------- */
+
+/* An input beside a button. On a phone there is not room for both, so they
+   stack and the button goes full width — a 90px "Ask" next to a squashed box
+   is worse than either. `min-width: 0` is what stops a long value forcing the
+   input wider than its share; flex items refuse to shrink past their content
+   without it. */
+
+.form-row {
+  display: flex;
+  gap: var(--gap-sm);
+  flex-wrap: wrap;
+}
+
+.form-row .input {
+  flex: 1;
+  min-width: 0;
+}
+
+@media (max-width: 640px) {
+  .form-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .form-row .btn {
+    width: 100%;
+  }
+}
+
+/* ---------- Laptop ---------- */
+
+@media (min-width: 1024px) {
+  .shell {
+    padding: var(--gap-xl) var(--gap-lg);
+  }
+
+  /* The whole signed-in app used to be a 620px ribbon at every width, so on a
+     laptop two thirds of the screen was empty and the notes list sat a full
+     scroll below the question box. Asking and searching go on the left, the
+     library they draw from on the right, and both are visible at once. */
+  .notes-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+    gap: var(--gap-lg);
+  }
+}
