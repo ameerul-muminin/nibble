@@ -31,6 +31,7 @@ import {
   listQuizzes,
   updateQuestion,
 } from '../api'
+import { Button } from './Button'
 
 /** A letter for each option, so a question reads like a real exam paper. */
 const LETTERS = ['A', 'B', 'C', 'D']
@@ -365,14 +366,13 @@ export function QuizMe({ docs, onNoteGone }) {
               ))}
             </select>
 
-            <button
-              type="button"
-              className="btn btn--primary"
+            <Button
+              variant="primary"
               disabled={busy || !noteId || !title.trim()}
               onClick={handleCreate}
             >
               {busy ? 'Writing…' : 'Write questions'}
-            </button>
+            </Button>
           </form>
 
           {docs.length === 0 && (
@@ -421,28 +421,25 @@ export function QuizMe({ docs, onNoteGone }) {
                   {quiz.question_count === 1 ? 'question' : 'questions'}
                 </div>
               </div>
-              <button
-                type="button"
-                className="btn btn--accent"
+              <Button
+                variant="accent"
                 onClick={() => handleOpen(quiz.id, 'taking')}
               >
                 Practise
-              </button>
-              <button
-                type="button"
-                className="btn btn--secondary"
+              </Button>
+              <Button
+                variant="secondary"
                 onClick={() => handleOpen(quiz.id, 'editing')}
               >
                 Edit
-              </button>
-              <button
-                type="button"
-                className="btn btn--secondary"
+              </Button>
+              <Button
+                variant="secondary"
                 aria-label={`Delete the quiz ${quiz.title}`}
                 onClick={() => handleDeleteQuiz(quiz.id)}
               >
                 ×
-              </button>
+              </Button>
             </div>
           ))}
         </>
@@ -456,9 +453,8 @@ export function QuizMe({ docs, onNoteGone }) {
               marginBottom: 'var(--gap)',
             }}
           >
-            <button
-              type="button"
-              className="btn btn--secondary"
+            <Button
+              variant="secondary"
               onClick={() => {
                 // Going back is an intent too: a quiz still loading must not
                 // reopen itself after you have left. Unconditional for the same
@@ -470,18 +466,17 @@ export function QuizMe({ docs, onNoteGone }) {
               }}
             >
               ← All quizzes
-            </button>
+            </Button>
             <strong style={{ flex: 1 }}>{open.title}</strong>
-            <button
-              type="button"
-              className="btn btn--secondary"
+            <Button
+              variant="secondary"
               onClick={() => {
                 setMode(mode === 'taking' ? 'editing' : 'taking')
                 setPicked({})
               }}
             >
               {mode === 'taking' ? 'Edit questions' : 'Practise'}
-            </button>
+            </Button>
           </div>
 
           {mode === 'taking' && answered.length > 0 && (
@@ -564,10 +559,9 @@ function Question({ question, index, mode, pickedIndex, onPick, onSave, onDelete
           else if (answered && i === pickedIndex) background = 'var(--coral)'
 
           return (
-            <button
+            <Button
               key={i}
-              type="button"
-              className="btn btn--secondary"
+              variant="secondary"
               disabled={answered}
               onClick={() => onPick(i)}
               style={{
@@ -579,7 +573,7 @@ function Question({ question, index, mode, pickedIndex, onPick, onSave, onDelete
               }}
             >
               <strong>{LETTERS[i]}.</strong> {option}
-            </button>
+            </Button>
           )
         })}
 
@@ -657,23 +651,21 @@ function Question({ question, index, mode, pickedIndex, onPick, onSave, onDelete
         <span style={{ color: 'var(--text-muted)', flex: 1 }}>
           From page {question.page} — check it against what the page says.
         </span>
-        <button
-          type="button"
-          className="btn btn--primary"
+        <Button
+          variant="primary"
           disabled={!changed}
           // options and correct always travel together. See the note above.
           onClick={() => onSave({ prompt, options, correct })}
         >
           Save
-        </button>
-        <button
-          type="button"
-          className="btn btn--secondary"
+        </Button>
+        <Button
+          variant="secondary"
           aria-label={`Delete question ${index + 1}`}
           onClick={onDelete}
         >
           Delete
-        </button>
+        </Button>
       </div>
     </div>
   )

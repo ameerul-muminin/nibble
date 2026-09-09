@@ -28,6 +28,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useClerk, useUser } from '@clerk/react'
 import { getStudentRoom, joinRoom, submitAnswers } from '../api'
 import { POLL_MS } from './Classroom'
+import { Button } from './Button'
 
 /** A letter per option, so a question reads like a real exam paper. */
 const LETTERS = ['A', 'B', 'C', 'D']
@@ -258,13 +259,13 @@ export function StudentRoom() {
               textTransform: 'uppercase',
             }}
           />
-          <button
+          <Button
             type="submit"
-            className="btn btn--primary"
+            variant="primary"
             disabled={joining || !code.trim() || !isLoaded}
           >
             {joining ? 'Joining…' : 'Join'}
-          </button>
+          </Button>
         </form>
       </section>
     )
@@ -286,9 +287,9 @@ export function StudentRoom() {
           Thanks for taking part. Your teacher has everything you handed in. Nibble is
           signing you out.
         </p>
-        <button type="button" className="btn btn--primary" onClick={() => signOut()}>
+        <Button variant="primary" onClick={() => signOut()}>
           Sign out now
-        </button>
+        </Button>
       </section>
     )
   }
@@ -348,9 +349,9 @@ export function StudentRoom() {
                 const chosen = picked[question.id] === optionIndex
 
                 return (
-                  <button
+                  <Button
                     key={optionIndex}
-                    type="button"
+                    variant="plain"
                     // aria-pressed is what tells a screen reader this button is a
                     // choice that is currently made, rather than an action. The
                     // lime background says the same thing to everyone else, and
@@ -373,7 +374,7 @@ export function StudentRoom() {
                       {LETTERS[optionIndex]}
                     </strong>{' '}
                     {option}
-                  </button>
+                  </Button>
                 )
               })}
             </div>
@@ -381,14 +382,13 @@ export function StudentRoom() {
         ))}
       </ol>
 
-      <button
-        type="button"
-        className="btn btn--primary"
+      <Button
+        variant="primary"
         disabled={sending || answered === 0}
         onClick={handleHandIn}
       >
         {sending ? 'Handing in…' : 'Hand it in'}
-      </button>
+      </Button>
 
       <p style={{ color: 'var(--text-muted)', marginBottom: 0 }}>
         You can only hand in once, so check your answers first.

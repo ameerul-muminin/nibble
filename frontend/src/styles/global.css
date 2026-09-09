@@ -279,3 +279,32 @@ h3 {
     max-width: 92%;
   }
 }
+
+/* ---------- A button that does not look like one ---------- */
+
+/* The note-row filename toggle. It opens and closes the pieces underneath, so
+   it has to be a real <button> — reachable by Tab, operable with Enter and
+   Space, and announced as a control — while looking like the filename it is.
+   A <div onClick> would look identical and be none of those things.
+
+   `font: inherit` matters: a button does not inherit the page's font family or
+   size the way everything else does, so without this it renders in the
+   browser's default UI font and the row looks broken. */
+
+.btn-plain {
+  font: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* No underline at rest — the point of `plain` is that it does not look like a
+   control. On hover it says so, which is affordance without decoration. */
+.btn-plain:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}

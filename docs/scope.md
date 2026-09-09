@@ -2172,10 +2172,34 @@ That is a real cost and it is being accepted with eyes open, not overlooked.
       stays ink and the coral moved into a `!` mark beside it — ink on coral, the
       same way every button in this app is ink on a bright colour. That is
       `.notice-bad` in `global.css`, and it settles the first bullet of #20 below.
-- [ ] **#18 `Button.jsx`** — `variant` of `primary` / `secondary` / `accent`, plus
-      a `plain` variant for the note-row filename toggle, which has to stay a real
-      `<button>` for the keyboard while not looking like one. Replaces every raw
-      `<button>` in `App.jsx` and `Landing.jsx`.
+- [x] **#18 `Button.jsx`** — done. `variant` of `primary` / `secondary` /
+      `accent`, plus `plain` for a control that has to be a real `<button>` for
+      the keyboard while not looking like one.
+
+      **It replaced 35 raw buttons, not the "`App.jsx` and `Landing.jsx`" this
+      line originally said.** That wording was written before slices 6, 7 and 8
+      existed; `QuizMe`, `Classroom`, `StudentRoom` and `Results` had another 23
+      between them. Leaving those raw would have been worse than not building the
+      component at all — a shared button that half the app ignores is just a
+      fourth way of writing a button.
+
+      **`plain` turned out to already exist, three times, by hand.** The note-row
+      toggle, the room-row toggle and the quiz option each carried the same inline
+      reset — `background: none; border: none; font: inherit; cursor: pointer` —
+      written out separately. That is the argument for the component in one
+      finding, and it is why `.btn-plain` sets `font: inherit`: a `<button>` does
+      not inherit the page's font the way everything else does.
+
+      **The Clerk trap below was checked rather than assumed.** Driving the real
+      landing page in a browser, clicking "Start learning" — now a `<Button>` —
+      opens Clerk's modal. If `...rest` were missing it would have done nothing,
+      silently.
+
+- [x] **The upload card moved to the top.** It was three cards down, so the first
+      thing a new person saw was a question box for notes they had not uploaded
+      yet. It now runs the full width of the grid above both columns, and the
+      split below it is the order you actually do things in: get a note in, ask it
+      things, then test yourself on it and look inside it.
 - [ ] **#19 Nibble's moods, empty states and loading states** — `happy` and
       `curious` on `Mascot`, then Nibble in the header, in both empty states,
       thinking while an answer is in flight, and happy beside the newest answer.
