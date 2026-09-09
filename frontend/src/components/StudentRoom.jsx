@@ -25,7 +25,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { useClerk } from '@clerk/react'
+import { useClerk, useUser } from '@clerk/react'
 import { getStudentRoom, joinRoom, submitAnswers } from '../api'
 import { POLL_MS } from './Classroom'
 
@@ -46,6 +46,18 @@ const SIGN_OUT_MS = 4000
 
 export function StudentRoom() {
   const { signOut } = useClerk()
+
+  // Slice 8: what the teacher's marking screen will call this person.
+  //
+  // Read from Clerk rather than asked for, because a box saying "your name"
+  // is one more thing to fill in while thirty people are typing a code off a
+  // projector, and Clerk already knows.
+  //
+  // Every one of these can be missing — Clerk allows an account with an email
+  // and nothing else — so this falls through to '' and the backend calls them
+  // "Student 1" by join order. An empty name is normal here, not an error.
+  const { user } = useUser()
+  const myName = user?.fullName || user?.firstName || user?.username || ''
 
   // What the student typed, before it is a room.
   const [code, setCode] = useState('')
@@ -149,7 +161,7 @@ export function StudentRoom() {
     setJoining(true)
     setNotice(null)
     try {
-      const entry = await joinRoom(code)
+      const entry = await joinRoom(code, myName)
       setJoined(entry.code)
       setPicked({})
     } catch (error) {

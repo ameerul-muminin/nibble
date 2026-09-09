@@ -64,11 +64,11 @@ already closed.
 | 3   | Search, no AI yet     | Slice 3 — Search          | done, merged            |
 | 4   | Nibble answers        | Slice 4 — Nibble answers  | done, merged            |
 | 4.5 | On the internet       | — (unplanned)             | done, merged, deployed  |
-| 4.6 | What real use broke   | — (unplanned)             | built, not yet merged   |
+| 4.6 | What real use broke   | — (unplanned)             | done, merged            |
 | 5   | Make it Nibble        | Slice 5 — Make it Nibble  | paused — now last       |
-| 6   | Quiz yourself         | Slice 6 — Quiz yourself   | built, not yet merged   |
-| 7   | The classroom         | Slice 7 — The classroom   | built, not yet merged   |
-| 8   | Marking               | Slice 8 — Marking         | open                    |
+| 6   | Quiz yourself         | Slice 6 — Quiz yourself   | done, merged            |
+| 7   | The classroom         | Slice 7 — The classroom   | done, merged            |
+| 8   | Marking               | Slice 8 — Marking         | built, not yet merged   |
 
 **Build order is no longer the same as the numbering**, as of 2026-09-08: deploy
 4.5, then 6, 7, 8, and slice 5 last. Why is under "Current state" below.
@@ -79,6 +79,26 @@ or the classroom feature, and both can be dropped if time runs out.
 **Slice 3 is the pivotal one.** Semantic search with no chatbot involved — typing
 "osmosis" and watching the right paragraph surface. It's the moment RAG stops being
 magic, and it's a working demo on its own even if everything after it fails.
+
+## Current state, 2026-09-09
+
+**The stack of unmerged slices is gone.** `main` is at `7c47773`, and 4.6, 6 and 7
+all landed today as **#44, #45 and #46**. That was the thing slice 7 said a person
+had to go do — its branch sat on slice 6's, which sat on 4.6's, and opening a pull
+request from the top of that pile is a 3,000-line diff nobody really reads. Slice 8
+branches off `main` instead of off slice 7, which is the first time since slice 4
+that a slice has started from a clean base.
+
+**Slice 8 is building**, off `feat/slice-8-marking`. What it decided before starting
+is under Slice 8 below, including the one decision that reaches backwards into slice
+7's schema: students now have names.
+
+**Two things slice 7 owed are still owed**, and neither is fixed by merging it: a
+real class on two devices against the deployed backend, and timing the three-second
+poll on Render's 0.1 CPU. Both are listed under "Still needing a person" there.
+
+The section below is kept as it was written, because the drift it describes is worth
+reading rather than tidying away.
 
 ## Current state, 2026-09-08
 
@@ -2888,13 +2908,191 @@ ordinary `UPDATE`, and "was this changed?" is still answerable by comparing it w
 rather than a bad class, and that is the most useful thing this screen can tell a
 teacher.
 
+### Decided, 2026-09-09, before building
+
+Everything above still holds. What follows is what a day of reading slice 7's code
+added to it, and one of these reaches further than this slice does.
+
+**One response, not two.** `GET /rooms/{id}/results` returns the room, the questions
+and the students in a single body, and the screen joins them by id. A per-student
+call and a per-question call would be two round trips and two chances to draw one
+table out of halves that disagree. Thirty students by ten questions is three hundred
+answer rows, which is nothing.
+
+**It is the deliberate inverse of `_student_questions`, and says so out loud.** That
+helper strips `correct` and `page` because the person reading does not own the quiz.
+This one sends `correct` on purpose, because the person reading does. Two functions
+in the same file doing opposite things for the same reason is exactly where somebody
+later copies the wrong one, so the one that sends the answer key names why, in the
+place they would be standing when they did it.
+
+**The override changes `mark` and nothing else.** Not `chosen`. The teacher is
+overruling the judgement, not rewriting what the student picked, and a screen that
+quietly edited somebody's answer would be lying about what happened in the room.
+
+**"Was this overridden?" stays derived.** `mark != (chosen == correct)` answers it at
+read time, with no second column — which is precisely what the comment over
+`answers.mark` promised when slice 7 wrote that column a slice early. An `overridden`
+flag would be a second copy of a fact already in the row, and it could disagree with
+the row.
+
+**There is no race to lose here, and that is worth stating rather than inferring.**
+Review found five read-before-write gaps in slice 7's room routes. This `PATCH` is a
+single `UPDATE ... WHERE` with the ownership test inside the same statement, so there
+is no moment between deciding the change is allowed and making it. Nothing to
+re-check before the commit, because nothing was read separately.
+
+**A question is flagged when at least three students answered it and fewer than half
+got it right.** Three, because half of two is a coin flip: a flag that fires on noise
+gets ignored, and an ignored flag is worse than no flag. Both numbers are named
+constants in `routes.py`, and the rule is computed in the backend so that there is
+one of it rather than one per screen.
+
+**Unanswered is not markable, and that is a limit rather than an oversight.** A blank
+has no `answers` row, so there is no `aid` to `PATCH`; and `answers.chosen` is
+`NOT NULL`, so there is nothing to insert instead. A teacher cannot give credit for a
+question a student never reached. Fixing it needs a nullable `chosen` and a decision
+about what an unanswered-but-credited row means to every other reader of that table,
+which is a slice of its own, not a corner of this one.
+
+**No poll on this screen.** Fetched when it opens, with a Refresh button.
+`Classroom.jsx` already polls the room for the joiner count; a second poll dragging
+every answer in the class across the wire every three seconds, to keep a table
+current that nobody is reading yet, spends exactly the tenth of a CPU slice 7 was
+careful about. Marking happens after the class, not during it.
+
+### Students have names now, and it costs more than a column
+
+The marking screen has to say **who**, and until this slice the only thing stored
+about a student was `room_members.user_id` — Clerk's `user_2abc...`. A column of
+those is not a marking screen; it is a hex dump with marks next to it.
+
+**A student's name is captured when they join**, sent by the frontend from Clerk's
+`useUser()` so that nobody has to type anything. Three consequences, none free:
+
+- **`auth.py` says something that stops being true.** Its docstring reads "That is
+  the only thing about a human being this project stores. Not their email, not their
+  name." The first half stays true _of the token_ — we still learn nothing but `sub`
+  from it — but the project now stores a name, and the sentence is amended to say
+  where. A comment that quietly goes false is worse than no comment, because the next
+  person believes it.
+- **The name is client-supplied, therefore spoofable.** "Never trust a value that came
+  from the client" is a rule in `CLAUDE.md`, and this does not break it: the name is
+  trimmed, length-capped, and only ever displayed — it never decides anything. But a
+  student can call themselves whatever they like and the teacher's screen will say it.
+  Accepted, because the alternatives are Clerk's backend API (a network call, a secret
+  key, a new dependency) or a token claim Clerk does not put there by default, which
+  would make `current_user_id` return more than a string and touch every route.
+- **An empty name is normal, not an error.** Clerk lets somebody sign up with an email
+  and never give a name. Those fall back to `Student 1`, `Student 2` by join order,
+  computed at read time in the results route — one rule in one place, and the position
+  is stable because `joined_at` and `id` are.
+
+**And the cheap moment for this passed a few hours ago.** `room_members` was created
+without a `name` column in slice 7, which is now on `main` — so anybody who has run
+that code has a table `CREATE TABLE IF NOT EXISTS` will never add a column to. That
+is the slice 4.5 failure exactly, and the reason `_check_shape()` exists at all. It is
+extended to demand `room_members.name` and to raise `DatabaseOutOfDate` naming that
+table, so this fails at startup with a sentence rather than at the first join with an
+`OperationalError`.
+
+**`POST /rooms/join` gains a field, which is an amendment to a written contract.**
+`api.md`'s own rules say a shape that already exists does not change silently, so it
+is said here and there: the entry gains `name`, the field is optional so an older
+frontend still joins, and nothing outside this branch had come to depend on it —
+slice 7 merged today.
+
+### The results screen is `Results.jsx`, and the checklist below was wrong
+
+The checklist said `App.jsx`. That is the third slice running where it would have
+been wrong: slice 6 made `QuizMe.jsx`, slice 7 made `Classroom.jsx` and
+`StudentRoom.jsx`, both times because `App.jsx` was already past a thousand lines.
+Corrected rather than followed. It mounts from `Classroom`'s room view, over the
+literal placeholder sitting there now that reads "Marking what came back is slice 8."
+
+### Built in full, for the third slice running
+
+Slices 6 and 7 each recorded this override once. This is three, and three is not a run
+of exceptions — it is how this project builds. Recorded as a decision rather than left
+to drift:
+
+**The pull request gate is waived for slice 8, deliberately, by the tech lead.**
+Neither Fahim nor Arman will have authored `routes.py`, `Results.jsx` or the classroom
+components by the end of it. The cost is exactly what `CLAUDE.md` says it is —
+"explain this change in your own words" now fails at review, or never runs at all, and
+whoever presents this has to have read code they did not write. That is a people
+problem with a people fix, and a checklist item here does not solve it.
+
 ### Checklist
 
-- [ ] `api.md` — `GET /rooms/{id}/results` and `PATCH /rooms/{id}/answers/{aid}`
-- [ ] `routes.py` — both, scoped by `WHERE owner_id = ?` _(Fahim, scaffolded)_
-- [ ] `App.jsx` — the results table, per student and per question, with the override
-      _(Arman, scaffolded)_
-- [ ] The flag for a question most of the room got wrong
+- [x] `api.md` — `GET /rooms/{id}/results`, `PATCH /rooms/{id}/answers/{aid}`, and the
+      `name` amendment to `POST /rooms/join`
+- [x] `db.py` — `room_members.name`, and `_check_shape()` extended to demand it
+- [x] `auth.py` — the docstring sentence that stopped being true
+- [x] `routes.py` — both routes scoped by `WHERE owner_id = ?`, plus `join_room`
+      storing the name _(Fahim's file — **built, not scaffolded**; see above)_
+- [x] The flag for a question most of the room got wrong, computed in the backend
+- [x] `Results.jsx` — the two tables and the override _(Arman's area — **built**)_
+- [x] `Classroom.jsx` — mount it over the slice 8 placeholder
+- [x] `StudentRoom.jsx` — send the name from Clerk on join
+- [x] `api.js` — `getResults` and `setMark`, and both added to `PROTECTED` in
+      `test_auth.py`
+- [x] `test_marking.py` — the rules listed under "Decided, 2026-09-09"
+
+### Checked by running it, 2026-09-09, and what that does not cover
+
+- **339 backend tests pass**, 21 of them new. Seventeen in `test_marking.py`, two
+  in `test_db.py` for the new shape check, and the two slice 8 routes added to
+  `PROTECTED` in `test_auth.py`.
+- **A whole lesson was driven over real HTTP**, against a real `uvicorn` on a
+  fresh database rather than a `TestClient`: a note uploaded, a quiz written by
+  the real Groq call, a class opened, three students joined, Start, three papers
+  handed in — one of them deliberately partial — End, results read, a mark
+  overridden, and read again. Every assertion passed, including the ones that
+  must fail: a mark of `7` is a 400, a student reading the results is a 404, and
+  a student marking their own paper is a 404.
+- **The two named students came back named and the third came back numbered.**
+  `Student 3` for the one who joined without a name, which is the Clerk case this
+  slice had to design for rather than the one it hoped for.
+- **The override moved the score and the per-question count and left `chosen`
+  alone**, and marking it back cleared `overridden` — the property that only
+  holds because it is derived rather than stored.
+- **The real `nibble.db` in `backend/` is refused**, with the sentence rather than
+  a traceback. That database has `room_members` without `name`, exactly as
+  predicted, so this is the slice 4.5 hazard caught at startup instead of at the
+  first join of a real lesson.
+- Frontend lint and a real `vite build` are both green.
+
+**What none of that covers: the screen.** Everything above is HTTP and Python. No
+part of it draws `Results.jsx`, so nothing here proves the two tables render, that
+the override buttons are reachable, or that the flag chip looks like anything. Two
+real Clerk accounts are needed for that and this check could not sign in. It is the
+first item under "Still needing a person" below, and slice 7's own note about
+leaving the browser check open is worth re-reading before it is ticked.
+
+**One thing worth passing to slice 6 rather than fixing here.** The quiz the real
+Groq call wrote for this run had `correct` as option A for all three questions. It
+does not affect anything slice 8 does — the marking is right either way — but a quiz
+whose answer is always the first option is a quiz a class works out in a minute.
+Noted, not chased.
+
+### Still needing a person
+
+- [ ] **Open it in a browser, with two accounts.** A teacher opens a class, a
+      student joins and hands in, the teacher ends it and marks what came back.
+      This is the only part of the slice nothing above has touched.
+- [ ] **Delete or move `backend/nibble.db` before running this branch.** It is a
+      slice 7 database and the backend will now refuse it by name. That is the
+      intended behaviour, not a bug — but it will be the first thing anybody
+      pulling this hits, and the sentence tells them what to do.
+- [ ] **The name is a label a student chose.** Nothing stops somebody calling
+      themselves something rude on the projector at a demo. Trimmed and capped,
+      never trusted for anything, and worth knowing about before a room full of
+      people rather than during one.
+- [ ] **Editing a quiz while a room is running still moves the answer key**, the
+      open item slice 7 left. Marking makes it more visible rather than worse:
+      papers already in were marked against the key as it was, so a mid-quiz edit
+      now shows up as an inconsistency a teacher can see on this screen.
 
 ## Not doing right now
 

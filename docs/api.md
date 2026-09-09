@@ -642,8 +642,26 @@ they are.
 Request:
 
 ```json
-{ "code": "k7m2qp" }
+{ "code": "k7m2qp", "name": "Amina" }
 ```
+
+**`name` was added in slice 8**, and this is an amendment to an entry that already
+existed — said out loud here because rule 2 at the bottom of this file says a shape
+does not change quietly. The teacher's marking screen has to say *who*, and until
+slice 8 the only thing stored about a student was Clerk's opaque `user_2abc...`.
+
+It is **optional**. The frontend fills it from the student's Clerk profile so nobody
+types anything, but Clerk lets somebody sign up with an email and no name at all, so
+an absent or empty `name` is normal and not an error — `GET /rooms/{id}/results`
+falls back to `Student 1`, `Student 2` by join order.
+
+It is trimmed, capped at 60 characters, and **only ever displayed**. It never decides
+anything, which is what keeps a value the client chose from being a value the backend
+trusts. A student can put whatever they like in it, and the teacher's screen will show
+what they put.
+
+**The first join wins.** Joining again is still the same answer and still does not
+add a second member, and it does not rename anybody either.
 
 Response, `200`:
 
@@ -751,6 +769,134 @@ Errors: `404` not found, or not yours.
 **Deleting a quiz deletes the rooms made from it**, the same cascade again, and the
 same warning as the one under slice 6 about tidying up the morning of a lesson —
 one level deeper this time.
+
+---
+
+## Slice 8 — planned
+
+Marking. The teacher reads what the class handed in, and has the last word on every
+number.
+
+**Both routes are the teacher's**, and both start the same way every other teacher
+route does: `WHERE owner_id = ?` in the query that fetches the thing. There is no
+role to check, here or anywhere — see
+[`adr/0004-teacher-is-an-owner.md`](./adr/0004-teacher-is-an-owner.md).
+
+**This is the one place the answer key is sent on purpose.** `GET /rooms/code/{code}`
+in slice 7 strips `correct` field by field, because the student does not own the quiz.
+`GET /rooms/{id}/results` includes it, because the teacher does. Two routes in one
+file doing opposite things with the same column, and the difference between them is
+one `WHERE`.
+
+**Marks are computed at submit time and stored** — `answers.mark`, written in slice 7
+before anything read it. The teacher can change any of them. "Was this one changed?"
+is not stored: it is `mark != (chosen == correct)`, worked out when somebody looks.
+
+**A blank is not a wrong answer.** A student who ran out of time simply has no row for
+that question. It reads as unanswered everywhere, it scores nothing, and it cannot be
+given a mark — there is no answer to `PATCH`.
+
+### `GET /rooms/{id}/results`
+
+Everything that came back from one of your classes, in one response — the room, the
+questions, and the students with what each of them put.
+
+One request rather than three, because the screen draws two tables out of the same
+data and two round trips is two chances to draw them out of halves that disagree.
+
+```json
+{
+  "room": {
+    "id": 1,
+    "quiz_id": 3,
+    "title": "Chapter 4 — Cells",
+    "code": "K7M2QP",
+    "state": "closed",
+    "member_count": 3,
+    "question_count": 2,
+    "created_at": "2026-09-09T14:02:11"
+  },
+  "questions": [
+    {
+      "id": 11,
+      "position": 0,
+      "prompt": "What drives water across a semi-permeable membrane?",
+      "options": ["Active transport", "Osmosis", "Mitosis", "Respiration"],
+      "correct": 1,
+      "page": 42,
+      "answered": 3,
+      "right": 1,
+      "flagged": true
+    }
+  ],
+  "students": [
+    {
+      "user_id": "user_2abc",
+      "name": "Amina",
+      "joined_at": "2026-09-09T14:03:02",
+      "submitted": true,
+      "score": 1,
+      "answers": [
+        { "id": 90, "question_id": 11, "chosen": 2, "mark": 0, "overridden": false }
+      ]
+    }
+  ]
+}
+```
+
+`students` is in join order, and `answers` holds only the questions that student
+actually answered — a partial paper is short, not padded with nulls.
+
+`score` is the sum of that student's `mark`s, so it follows an override immediately.
+
+`name` is what the student's Clerk profile said when they joined. It can be missing —
+Clerk allows an account with no name — and then it is `"Student 1"`, `"Student 2"` by
+join order. It is a label and nothing else; see the note under `POST /rooms/join`.
+
+`overridden` is `true` when the stored `mark` disagrees with `chosen == correct`,
+which is the whole of "a person changed this".
+
+**`flagged` is a question most of the room got wrong**, and it is usually a bad
+question rather than a bad class — the most useful thing this screen can tell a
+teacher. It is `true` when **at least three students answered it and fewer than half
+got it right**. Three, because half of two is a coin flip, and a flag that fires on
+noise is a flag people learn to ignore. The rule is computed here, once, rather than
+in each screen that wants it.
+
+`answered` and `right` are the counts it was worked out from, so a teacher can see why
+it fired.
+
+Readable in any state. A class still `open` shows the papers that are already in.
+
+Errors: `404` — no room with that id, or it is not yours.
+
+### `PATCH /rooms/{id}/answers/{aid}`
+
+Change one mark.
+
+```json
+{ "mark": 0 }
+```
+
+Response, `200` — the answer as it now stands:
+
+```json
+{ "id": 90, "question_id": 11, "chosen": 2, "mark": 0, "overridden": true }
+```
+
+**Only `mark` changes.** Not `chosen`: the teacher is overruling the judgement, not
+rewriting what the student picked, and a screen that quietly edited somebody's answer
+would be lying about what happened in the room.
+
+Setting a mark back to what `chosen == correct` says makes `overridden` `false` again,
+because it is derived rather than remembered. Undo is just marking it back.
+
+Errors:
+
+| Status | When |
+| --- | --- |
+| `400` | `mark` is not `0` or `1` |
+| `404` | No answer with that id in that room, or that room is not yours |
 
 ---
 

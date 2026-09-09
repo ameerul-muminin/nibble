@@ -124,6 +124,56 @@ def test_a_database_from_before_notes_had_owners_is_refused():
         get_db()
 
 
+def test_a_database_from_before_students_had_names_is_refused():
+    """The same failure a second time, one slice later, and that is the point.
+
+    Slice 7 created `room_members` without a `name` column and merged. Slice 8
+    added the column — to a table people already had. `CREATE TABLE IF NOT
+    EXISTS` does nothing to an existing table, so those databases keep a shape
+    the code no longer matches, and the first student to join a class would get
+    an OperationalError out of the INSERT: a traceback, mid-lesson.
+
+    Pinned separately from the `documents` case above rather than folded into
+    it, because the two failures are independent — a database can have the new
+    `documents` and the old `room_members` — and because the sentence a person
+    reads is a different one.
+    """
+    import sqlite3
+
+    from app import config
+
+    # A room_members exactly as slice 7 wrote it: no name.
+    old = sqlite3.connect(config.DATABASE_FILE)
+    old.execute(
+        "CREATE TABLE room_members (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+        "room_id INTEGER NOT NULL, user_id TEXT NOT NULL, joined_at TEXT NOT NULL)"
+    )
+    old.commit()
+    old.close()
+
+    with pytest.raises(RuntimeError, match="Delete the file"):
+        get_db()
+
+
+def test_a_new_database_is_not_mistaken_for_an_out_of_date_one():
+    """No tables at all is a brand new database, which is completely fine.
+
+    The check looks at a table's *columns* rather than asking whether one is
+    missing, precisely so that "no such table" and "a table without the column"
+    can be told apart. Getting that wrong would refuse every fresh install.
+    """
+    conn = get_db()
+    try:
+        # It got as far as creating the schema, which is the whole claim.
+        tables = {
+            row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+    finally:
+        conn.close()
+
+    assert "room_members" in tables
+
+
 def test_an_out_of_date_database_reaches_a_person_as_a_sentence(tmp_path, monkeypatch):
     """The message is only half the job; the other half is it leaving the server.
 

@@ -418,11 +418,16 @@ export function deleteRoom(id) {
  * can be sent as it is. Joining twice is fine and is the same answer both
  * times — a refresh does not make somebody a second student.
  */
-export function joinRoom(code) {
+export function joinRoom(code, name = '') {
   return request('/rooms/join', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ code }),
+    // `name` was added in slice 8 so the teacher's marking screen can say who
+    // handed in what. It comes from the student's Clerk profile rather than a
+    // box they type in, and it is allowed to be empty — Clerk lets somebody
+    // sign up with an email and no name, and the backend then calls them
+    // "Student 1" by join order.
+    body: JSON.stringify({ code, name }),
   })
 }
 
@@ -451,5 +456,44 @@ export function submitAnswers(roomId, answers) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ answers }),
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Slice 8 — marking
+// ---------------------------------------------------------------------------
+//
+// Both of these are the teacher's, and both are about a room you own.
+
+/**
+ * Slice 8: everything that came back from one of your classes.
+ *
+ * One request, three parts: `room`, `questions` and `students`. The screen
+ * joins them by id rather than asking for them separately — two round trips is
+ * two chances to draw one table out of halves that disagree.
+ *
+ * **This is the one response that contains the answer key**, and that is on
+ * purpose: `correct` follows ownership, and this is your quiz. The student's
+ * poll strips it. Do not reuse this shape for anything a student can call.
+ */
+export function getResults(roomId) {
+  return request(`/rooms/${roomId}/results`)
+}
+
+/**
+ * Slice 8: change one mark. `mark` is 0 or 1.
+ *
+ * Only the mark moves — never `chosen`. The teacher is overruling the
+ * judgement, not rewriting what the student picked.
+ *
+ * Comes back with `overridden`, which is worked out rather than stored, so
+ * setting a mark back to what the machine said clears it again. Undo is just
+ * marking it back.
+ */
+export function setMark(roomId, answerId, mark) {
+  return request(`/rooms/${roomId}/answers/${answerId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mark }),
   })
 }

@@ -176,6 +176,22 @@ CREATE TABLE IF NOT EXISTS room_members (
     -- The student. Clerk's `sub`, same as everywhere.
     user_id   TEXT    NOT NULL,
 
+    -- What to call them on the teacher's marking screen. Added in slice 8, and
+    -- it is the first human-readable thing about a person this project stores —
+    -- auth.py's docstring used to say the Clerk id was the only one, and was
+    -- amended when this landed rather than left to quietly go false.
+    --
+    -- It comes from the student's Clerk profile, sent by the frontend at join
+    -- time so that nobody has to type it. That makes it a value the client
+    -- chose, so it is trimmed, length-capped, and **only ever displayed** — it
+    -- never decides anything, which is the line between a value you show and a
+    -- value you trust. A student can call themselves whatever they like.
+    --
+    -- DEFAULT '' because Clerk allows an account with no name at all, and an
+    -- empty one is normal rather than an error: the results route turns it into
+    -- 'Student 1', 'Student 2' by join order when somebody looks.
+    name      TEXT    NOT NULL DEFAULT '',
+
     joined_at TEXT    NOT NULL,
 
     -- One row per person per room, enforced here rather than remembered in the
@@ -293,8 +309,20 @@ class DatabaseOutOfDate(RuntimeError):
     """
 
 
+def _columns_of(conn: sqlite3.Connection, table: str) -> set[str]:
+    """The column names of a table, or an empty set if it does not exist.
+
+    The empty set is the interesting half. It means "no such table", which is a
+    brand new database and completely fine — the schema is about to create it.
+    A table that exists *without* the column we need is the bad case, and telling
+    those two apart is the whole reason this looks at the columns rather than
+    just asking whether one is missing.
+    """
+    return {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+
+
 def _check_shape(conn: sqlite3.Connection) -> None:
-    """Refuse to run against a database from before notes had owners.
+    """Refuse to run against a database whose tables predate the code.
 
     ``CREATE TABLE IF NOT EXISTS`` does exactly what it says: if `documents`
     already exists, the statement above does nothing at all — including nothing
@@ -308,24 +336,40 @@ def _check_shape(conn: sqlite3.Connection) -> None:
     which is the same trade as everywhere else: the data is a handful of
     uploaded chapters, and re-uploading them costs a minute.
 
+    **There are two of these now, and the second one proves the first was not a
+    one-off.** Slice 4.5 added `documents.user_id`; slice 8 added
+    `room_members.name`, to a table slice 7 had already created on `main`. Both
+    times the new column landed on a table that existing databases already had,
+    and both times `CREATE TABLE IF NOT EXISTS` did exactly nothing about it. The
+    check below is the same shape twice for that reason, and adding a third is
+    two lines rather than a new idea.
+
     Raises:
-        RuntimeError: the `documents` table exists but predates `user_id`.
+        DatabaseOutOfDate: a table exists but is missing a column added later.
     """
-    columns = {row["name"] for row in conn.execute("PRAGMA table_info(documents)").fetchall()}
+    # Slice 4.5. Without user_id, every insert fails on a column that is not
+    # there and every query filters on one either.
+    documents = _columns_of(conn, "documents")
 
-    # An empty answer means the table does not exist at all, which is a brand
-    # new database and completely fine — the schema is about to create it. Only
-    # a `documents` that exists *without* user_id is the bad case, and telling
-    # those two apart is the whole reason this looks at the columns rather than
-    # just asking whether user_id is missing.
-    if not columns:
-        return
-
-    if "user_id" not in columns:
+    if documents and "user_id" not in documents:
         conn.close()
         raise DatabaseOutOfDate(
             f"The database file '{config.DATABASE_FILE}' was made before notes "
             "had owners, so Nibble cannot tell whose notes are whose in it. "
             "Delete the file and start the backend again — it will build a fresh "
             "one, and you can re-upload your notes."
+        )
+
+    # Slice 8. A room_members from slice 7 has no name column, so the first
+    # student to join a class would hit an OperationalError from the INSERT —
+    # a traceback, mid-lesson, instead of a sentence at startup.
+    members = _columns_of(conn, "room_members")
+
+    if members and "name" not in members:
+        conn.close()
+        raise DatabaseOutOfDate(
+            f"The database file '{config.DATABASE_FILE}' was made before students "
+            "had names, so Nibble cannot tell you who handed in what. Delete the "
+            "file and start the backend again — it will build a fresh one, and you "
+            "can re-upload your notes."
         )

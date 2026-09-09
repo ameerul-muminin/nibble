@@ -1395,6 +1395,11 @@ _CODE_ATTEMPTS = 5
 # decide whether a requested move goes forwards, backwards, or nowhere.
 _STATES = ("waiting", "open", "closed")
 
+# How many characters of a student's display name to keep. Long enough for any
+# real name, short enough that one row cannot take over the marking screen.
+# Nothing stops a browser sending a megabyte in that field.
+_NAME_MAX = 60
+
 
 class RoomRequest(BaseModel):
     """The body of POST /rooms: which quiz this room runs."""
@@ -1409,9 +1414,16 @@ class StateRequest(BaseModel):
 
 
 class JoinRequest(BaseModel):
-    """The body of POST /rooms/join: the code off the board."""
+    """The body of POST /rooms/join: the code off the board, and who you are.
+
+    ``name`` was added in slice 8, when the marking screen needed to say *who*
+    handed in what. It is optional, because Clerk allows an account with no name
+    at all and an older frontend does not send one — an absent name is normal
+    rather than an error, and the results route turns it into "Student 1".
+    """
 
     code: str
+    name: str = ""
 
 
 class SubmittedAnswer(BaseModel):
@@ -1469,6 +1481,33 @@ def _tidy_code(raw: str) -> str:
     code" means.
     """
     return raw.strip().upper()
+
+
+def _tidy_name(raw: str) -> str:
+    """A student's display name, as it is safe to store and show.
+
+    **This is a value the client chose**, so the rule from CLAUDE.md applies:
+    never trust a filename, a path, or anything else that came from the browser.
+    What keeps this the right side of that line is not the tidying below — it is
+    that the name is *only ever displayed*. Nothing looks a student up by it,
+    nothing authorises anything with it, and two students called the same thing
+    are still two different `user_id`s everywhere it matters.
+
+    So the tidying is about a table staying readable rather than about safety:
+
+    - stripped, because a name that is entirely spaces is not a name;
+    - capped at _NAME_MAX, because nothing stops a browser sending a megabyte,
+      and a marking screen with one very wide column is a broken screen;
+    - newlines and tabs flattened to single spaces, so one student cannot push
+      every other row down the page.
+
+    HTML is *not* escaped here, and deliberately: React escapes what it renders,
+    so escaping on the way in would store `&amp;` for somebody actually called
+    O'Hara & co. Escaping belongs where the thing is drawn, once.
+    """
+    flattened = " ".join(raw.split())
+
+    return flattened[:_NAME_MAX]
 
 
 def _own_room(db, room_id: int, user_id: str) -> None:
@@ -1910,8 +1949,16 @@ def join_room(request: JoinRequest, user_id: str = Depends(current_user_id)):
 
     A room that is already open still accepts joins, so somebody who arrives
     late can still sit the quiz.
+
+    **The name is stored here and trusted nowhere.** It is what the student's
+    Clerk profile said, sent by their browser, so it is a value the client chose:
+    trimmed, capped, and only ever displayed on the teacher's marking screen. It
+    never decides anything. Because the insert is OR IGNORE, the first join wins
+    — coming back later does not rename anybody, which is the same property that
+    stops a refresh becoming a second student.
     """
     code = _tidy_code(request.code)
+    name = _tidy_name(request.name)
 
     if not code:
         raise HTTPException(
@@ -1942,8 +1989,9 @@ def join_room(request: JoinRequest, user_id: str = Depends(current_user_id)):
             )
 
         db.execute(
-            "INSERT OR IGNORE INTO room_members (room_id, user_id, joined_at) VALUES (?, ?, ?)",
-            (room["id"], user_id, joined_at),
+            "INSERT OR IGNORE INTO room_members (room_id, user_id, name, joined_at) "
+            "VALUES (?, ?, ?, ?)",
+            (room["id"], user_id, name, joined_at),
         )
 
         # The teacher can press End between the check above and the insert, and
@@ -2162,3 +2210,287 @@ def submit_answers(
         db.close()
 
     return {"submitted": True, "answered": len(rows)}
+
+
+# ---------------------------------------------------------------------------
+# Slice 8 — Marking
+# ---------------------------------------------------------------------------
+#
+# Two routes, both the teacher's, both starting with _own_room. Nothing new
+# about authority here: a teacher is somebody who owns the room, which is one
+# WHERE in the query that fetches it.
+#
+# **This is the one place in this file that sends the answer key on purpose.**
+# _student_questions, ninety lines up, exists to strip `correct` because the
+# person reading does not own the quiz. get_results includes it because the
+# person reading does. Two functions, one column, opposite jobs — and the
+# difference between them is which WHERE ran first. Anybody copying one of them
+# should be sure which one they have.
+#
+# The marks themselves were written in slice 7, at submit time, before anything
+# read them. That is what makes an override an ordinary UPDATE rather than a
+# second rule competing with `chosen == correct`.
+
+# How many answers a question needs before "most of the class got it wrong" is
+# a statement about the question rather than about two people. Half of two is a
+# coin flip, and a flag that fires on noise is one people learn to ignore.
+_FLAG_MIN_ANSWERS = 3
+
+# The share of answers that must be right for a question NOT to be flagged.
+# Fewer than half right is the flag.
+_FLAG_RIGHT_SHARE = 0.5
+
+
+class MarkRequest(BaseModel):
+    """The body of PATCH /rooms/{id}/answers/{aid}: the teacher's last word.
+
+    One field, and `chosen` is deliberately not in it. The teacher is overruling
+    the judgement, not rewriting what the student picked — a screen that quietly
+    edited somebody's answer would be lying about what happened in the room.
+    """
+
+    mark: int
+
+
+def _display_name(row, position: int) -> str:
+    """What to call a student on the marking screen.
+
+    Clerk allows an account with an email and no name, so an empty `name` is
+    normal rather than broken. Those become "Student 1", "Student 2" by join
+    order — worked out here, when somebody looks, rather than written into the
+    row at join time. Two reasons for that: a name stored as "Student 3" would
+    outlive whatever made it third, and there is then only one rule instead of
+    one at write time and another at read time.
+    """
+    return row["name"] or f"Student {position}"
+
+
+def _was_overridden(mark: int, chosen: int, correct: int) -> bool:
+    """Did a person change this mark?
+
+    Derived, never stored. `answers.mark` and the question's `correct` are both
+    already in the row being read, so an `overridden` column would be a second
+    copy of a fact — and a second copy can disagree with the first. Marking
+    something back to what the machine said makes this False again, which is
+    what makes undo simply "mark it back".
+    """
+    return mark != (1 if chosen == correct else 0)
+
+
+@router.get("/rooms/{room_id}/results")
+def get_results(room_id: int, user_id: str = Depends(current_user_id)):
+    """Everything that came back from one of your classes.
+
+    Contract, from docs/api.md: the room, the questions, and the students with
+    what each of them put — in one response.
+
+    **One request rather than three.** The screen draws two tables out of the
+    same data, and fetching it in halves is two round trips and two chances to
+    draw a table from halves that disagree. Thirty students by ten questions is
+    three hundred answer rows, which is small enough to send at once and small
+    enough to join in the browser.
+
+    Readable in any state. A class still running shows the papers already in;
+    there is no rule about `closed` here, because a fourth rule about state
+    would buy nothing.
+    """
+    db = get_db()
+    try:
+        _own_room(db, room_id, user_id)
+
+        room = _room_for_teacher(db, room_id)
+
+        # The questions of this room's quiz, answer key included. Read from the
+        # quiz rather than from the answers, so a question nobody answered is
+        # still a row on the screen rather than a gap.
+        questions = db.execute(
+            "SELECT id, position, prompt, options, correct, page FROM questions "
+            "WHERE quiz_id = ? ORDER BY position, id",
+            (room["quiz_id"],),
+        ).fetchall()
+
+        # Every answer in the room, once. Joined to questions for `correct`, so
+        # `overridden` can be worked out without a second lookup per row.
+        answers = db.execute(
+            """
+            SELECT a.id, a.user_id, a.question_id, a.chosen, a.mark, q.correct
+            FROM answers a
+            JOIN questions q ON q.id = a.question_id
+            WHERE a.room_id = ?
+            ORDER BY q.position, q.id
+            """,
+            (room_id,),
+        ).fetchall()
+
+        members = db.execute(
+            "SELECT user_id, name, joined_at FROM room_members "
+            "WHERE room_id = ? ORDER BY joined_at, id",
+            (room_id,),
+        ).fetchall()
+
+        # --- The per-student half ------------------------------------------
+        #
+        # Grouped in Python rather than with one query per student: thirty
+        # students would be thirty round trips to save a dict.
+        by_student: dict[str, list[dict]] = {row["user_id"]: [] for row in members}
+
+        for row in answers:
+            # An answer from somebody who is no longer a member cannot happen —
+            # membership is checked before a paper is stored, and losing it
+            # takes the answers with it through ON DELETE CASCADE. Guarded
+            # anyway, because the alternative to a guard here is a KeyError on
+            # the teacher's screen.
+            if row["user_id"] not in by_student:
+                continue
+
+            by_student[row["user_id"]].append(
+                {
+                    "id": row["id"],
+                    "question_id": row["question_id"],
+                    "chosen": row["chosen"],
+                    "mark": row["mark"],
+                    "overridden": _was_overridden(row["mark"], row["chosen"], row["correct"]),
+                }
+            )
+
+        students = []
+
+        for position, member in enumerate(members, start=1):
+            mine = by_student[member["user_id"]]
+
+            students.append(
+                {
+                    "user_id": member["user_id"],
+                    "name": _display_name(member, position),
+                    "joined_at": member["joined_at"],
+                    # A paper is written all at once, so any answer at all means
+                    # the whole thing is in. The same reading _has_handed_in
+                    # makes.
+                    "submitted": bool(mine),
+                    # Summed from the stored marks, not from chosen == correct,
+                    # so it follows an override the moment one happens.
+                    "score": sum(answer["mark"] for answer in mine),
+                    "answers": mine,
+                }
+            )
+
+        # --- The per-question half -----------------------------------------
+        #
+        # Counted from the same rows, so the two tables on screen can never
+        # disagree about what was answered.
+        counts: dict[int, dict[str, int]] = {
+            row["id"]: {"answered": 0, "right": 0} for row in questions
+        }
+
+        for row in answers:
+            if row["question_id"] not in counts:
+                continue
+
+            counts[row["question_id"]]["answered"] += 1
+            counts[row["question_id"]]["right"] += row["mark"]
+
+        summary = []
+
+        for row in questions:
+            answered = counts[row["id"]]["answered"]
+            right = counts[row["id"]]["right"]
+
+            summary.append(
+                {
+                    "id": row["id"],
+                    "position": row["position"],
+                    "prompt": row["prompt"],
+                    "options": json.loads(row["options"]),
+                    # Sent on purpose. See the note at the top of this section.
+                    "correct": row["correct"],
+                    "page": row["page"],
+                    "answered": answered,
+                    "right": right,
+                    # Counted from `mark`, so a teacher who overrules a question
+                    # they decide was badly worded sees the flag go out.
+                    "flagged": (
+                        answered >= _FLAG_MIN_ANSWERS and right < answered * _FLAG_RIGHT_SHARE
+                    ),
+                }
+            )
+    finally:
+        db.close()
+
+    return {"room": room, "questions": summary, "students": students}
+
+
+@router.patch("/rooms/{room_id}/answers/{answer_id}")
+def set_mark(
+    room_id: int,
+    answer_id: int,
+    request: MarkRequest,
+    user_id: str = Depends(current_user_id),
+):
+    """Change one mark. The teacher has the last word on every number.
+
+    Contract, from docs/api.md: the answer as it now stands, 200.
+
+    **There is no race to lose here, and that is worth saying rather than
+    leaving to be inferred.** Review found five read-before-write gaps in slice
+    7's room routes, every one of them a `SELECT` that had gone stale by the
+    time the `UPDATE` ran. This route has none, because there is nothing read
+    separately: the ownership test lives inside the `UPDATE` itself, as a
+    subquery, so "is this mine?" and "change it" are one statement. `rowcount`
+    then tells us which happened, and no second check is needed before the
+    commit.
+
+    A mark that is already what you asked for is still a 200. It changed nothing
+    and harmed nothing, exactly like asking a room for the state it is already
+    in.
+    """
+    # 0 or 1, not truthy or falsy. `mark` is summed into a score, so a 2 here
+    # would quietly make somebody's total wrong rather than fail.
+    if request.mark not in (0, 1):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A mark is either right or wrong. Try again.",
+        )
+
+    db = get_db()
+    try:
+        cursor = db.execute(
+            """
+            UPDATE answers SET mark = ?
+            WHERE id = ? AND room_id = ?
+              AND room_id IN (SELECT id FROM rooms WHERE owner_id = ?)
+            """,
+            (request.mark, answer_id, room_id, user_id),
+        )
+
+        # Nothing matched: no such answer, it belongs to another room, or that
+        # room is not yours. One 404 for all three, the same way every other
+        # ownership failure in this file is — the alternative tells somebody
+        # their guess was half right.
+        if cursor.rowcount == 0:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="That answer isn’t here. Reload the class and try again.",
+            )
+
+        db.commit()
+
+        row = db.execute(
+            """
+            SELECT a.id, a.question_id, a.chosen, a.mark, q.correct
+            FROM answers a
+            JOIN questions q ON q.id = a.question_id
+            WHERE a.id = ?
+            """,
+            (answer_id,),
+        ).fetchone()
+    finally:
+        db.close()
+
+    return {
+        "id": row["id"],
+        "question_id": row["question_id"],
+        "chosen": row["chosen"],
+        "mark": row["mark"],
+        "overridden": _was_overridden(row["mark"], row["chosen"], row["correct"]),
+    }
