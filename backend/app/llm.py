@@ -21,6 +21,8 @@ Three things, in the order they are used:
     AnswerUnavailable      -> raised when we could not get one at all
 """
 
+import sys
+
 import requests
 
 from app import config
@@ -244,7 +246,13 @@ def answer(question: str, context: str, history: list[dict] | None = None) -> st
             timeout=_TIMEOUT_SECONDS,
         )
     except requests.RequestException as exc:
-        raise AnswerUnavailable(f"Could not reach the answering service: {exc}") from exc
+        # Same as ocr.py: `{exc}` here is a requests error, written for
+        # somebody debugging the request rather than for the person waiting on
+        # an answer. `from exc` keeps it on the traceback.
+        print(f"[llm] could not reach the answering service: {exc}", file=sys.stderr)
+        raise AnswerUnavailable(
+            "Nibble couldn't reach the service that writes answers. Try again in a moment."
+        ) from exc
 
     if response.status_code == 429:
         # The same split as ocr.py: 429 covers both "too fast just now" and
@@ -262,7 +270,11 @@ def answer(question: str, context: str, history: list[dict] | None = None) -> st
     if not response.ok:
         # Deliberately not passing the provider's message through, for the same
         # reason ocr.py does not.
-        raise AnswerUnavailable(f"The answering service answered with {response.status_code}.")
+        print(f"[llm] the answering service returned {response.status_code}", file=sys.stderr)
+        raise AnswerUnavailable(
+            "The service that writes answers isn't answering properly just now. "
+            "Try again in a few minutes."
+        )
 
     try:
         text = response.json()["choices"][0]["message"]["content"]

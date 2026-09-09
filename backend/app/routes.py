@@ -1187,11 +1187,11 @@ def update_question(
     if patch.options is not None and patch.correct is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "Say which of the new options is the right one. The answer is stored as "
-                "a position in the list, so changing the list without it would leave the "
-                "answer pointing at the wrong line."
-            ),
+            # The second half of this used to explain that the answer is stored
+            # as a position in the list. True, and none of a student's business
+            # — an error message says what to do next, not how the table is
+            # laid out. The reasoning lives in the docstring above instead.
+            detail="Say which of the new options is the right one.",
         )
 
     if patch.options is not None:

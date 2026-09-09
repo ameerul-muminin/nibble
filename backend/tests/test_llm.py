@@ -189,7 +189,7 @@ def test_the_network_being_down_is_a_sentence_not_a_traceback(monkeypatch):
 
     monkeypatch.setattr(llm.requests, "post", refuse)
 
-    with pytest.raises(llm.AnswerUnavailable, match="Could not reach"):
+    with pytest.raises(llm.AnswerUnavailable, match="couldn't reach"):
         llm.answer("q", "notes")
 
 
@@ -209,14 +209,21 @@ def test_running_out_for_the_day_says_tomorrow_rather_than_a_moment(monkeypatch)
 
 
 def test_a_server_error_does_not_leak_the_providers_own_words(monkeypatch):
-    """Their message is written for whoever is billed, and can carry internals."""
+    """Their message is written for whoever is billed, and can carry internals.
+
+    This used to also assert that "500" was in the sentence, which was the same
+    mistake in smaller print: a bare status code is no more written for a
+    student than the body it came in. #21 took it out, so the test now asserts
+    what its own name has always claimed.
+    """
     _capture(monkeypatch, _FakeResponse(500, text="upstream connect error to 10.0.0.4:443"))
 
     with pytest.raises(llm.AnswerUnavailable) as raised:
         llm.answer("q", "notes")
 
-    assert "500" in str(raised.value)
     assert "10.0.0.4" not in str(raised.value)
+    assert "500" not in str(raised.value)
+    assert "Try again in a few minutes." in str(raised.value)
 
 
 def test_a_reply_we_cannot_read_is_a_sentence(monkeypatch):

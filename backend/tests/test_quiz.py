@@ -300,8 +300,13 @@ def test_the_network_being_down_is_a_sentence_not_a_traceback(monkeypatch):
 
     monkeypatch.setattr(quiz.requests, "post", boom)
 
-    with pytest.raises(quiz.QuizUnavailable, match="Could not reach"):
+    with pytest.raises(quiz.QuizUnavailable, match="couldn't reach") as raised:
         quiz.make_questions("notes", 5, PAGES)
+
+    # #21: the requests error itself is not in the sentence any more. It carries
+    # the URL and whatever the network layer had to say, and it goes to stderr
+    # instead — see the note above the print in quiz.py.
+    assert "no route to host" not in str(raised.value)
 
 
 def test_being_asked_too_fast_says_how_long_to_wait(monkeypatch):

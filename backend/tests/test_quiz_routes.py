@@ -280,7 +280,11 @@ def test_options_without_correct_is_refused(client):
     )
 
     assert response.status_code == 400
-    assert "position" in response.json()["detail"]
+    # The sentence stopped explaining that correct is an index — #21 took that
+    # out, because an error tells you what to do, not how the table is laid
+    # out. The rule it guards is unchanged, and the docstring above still
+    # carries the reasoning.
+    assert response.json()["detail"] == "Say which of the new options is the right one."
 
 
 def test_options_with_correct_is_accepted(client):
