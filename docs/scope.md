@@ -2200,9 +2200,24 @@ That is a real cost and it is being accepted with eyes open, not overlooked.
       yet. It now runs the full width of the grid above both columns, and the
       split below it is the order you actually do things in: get a note in, ask it
       things, then test yourself on it and look inside it.
-- [ ] **#19 Nibble's moods, empty states and loading states** — `happy` and
-      `curious` on `Mascot`, then Nibble in the header, in both empty states,
-      thinking while an answer is in flight, and happy beside the newest answer.
+- [x] **#19 Nibble's moods, empty states and loading states** — done. `happy`
+      closes the eyes into two upward arcs and widens the smile; `curious` is a
+      head tilt. Nibble is now in the header, in both empty states, thinking
+      while an answer is in flight, and happy beside the newest answer — and
+      nowhere else, because `design.md` is blunt that a mascot next to every
+      message stops being charming within a day.
+
+      **`curious` was wrong the first time and the fix is the interesting part.**
+      Rotating the whole SVG tilted the book along with the head, so the cat read
+      as falling over rather than leaning in. The head is now its own `<g>` and
+      pivots on the chin while the book stays flat. That is only visible by
+      looking at it, which is the argument for checking a drawing in a browser
+      rather than reasoning about its transform.
+
+      `Landing.jsx` keeps the flat `wave-nibble.svg` in the hero — a different,
+      richer drawing that never has to react to anything — but the small cat
+      beside its example answer is now the same happy `Mascot` the real app
+      shows, so the promise and the thing match.
 - [x] **`feat/deck-colours-and-responsive`** — the deck's surfaces, and the
       responsive pass the app had never had. The signed-in app was a 620px ribbon
       at every width, so a laptop showed two thirds empty page with the notes list
@@ -2246,10 +2261,11 @@ was built from the start. What is left:
   exactly that. It needs a word or an icon beside it.
 - **`.btn:disabled` is `opacity: 0.45`.** Ink on lime at 45% is almost certainly
   under 4.5:1, and the Ask button spends every slow answer in that state.
-- **`Mascot` has a hardcoded `aria-label="Nibble the cat"`.** That becomes a lie
-  the moment it has moods, and in most of the places #19 puts it the text beside
-  it already says the thing — so it is decorative there and should be hidden from
-  a screen reader rather than announced twice.
+- ~~**`Mascot` has a hardcoded `aria-label="Nibble the cat"`.**~~ **Done in #19.**
+  It is decorative by default now — `aria-hidden`, invisible to a screen reader —
+  with an optional `label` prop for the case where the cat is genuinely carrying
+  meaning on its own. Nothing passes it yet, which is the right answer: in every
+  place #19 put Nibble, the sentence beside it already says the thing.
 - **The keyboard run-through needs a person.** Unplug the mouse; upload, search,
   ask and delete. Nothing here can assert that.
 
