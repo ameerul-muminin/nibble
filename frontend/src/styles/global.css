@@ -187,3 +187,37 @@ h3 {
   border-radius: var(--radius-pill);
   background: var(--lime);
 }
+
+/* ---------- Something went wrong ---------- */
+
+/* Two rules meet here.
+   design.md says errors are coral, and it also says colour never carries a
+   meaning on its own. Coral text turned out to fail the second one twice over:
+   #F26B3D on white is about 3.2:1, under the 4.5:1 floor for body text, and it
+   says nothing at all to somebody who cannot tell coral from mint.
+   So the sentence stays ink and the coral moves into a mark beside it — ink on
+   coral, the same way every button in this app is ink on a bright colour. */
+
+.notice-bad {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--gap-sm);
+  color: var(--text);
+}
+
+.notice-bad__mark {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--ink);
+  border-radius: var(--radius-pill);
+  background: var(--coral);
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 15px;
+  line-height: 1;
+}

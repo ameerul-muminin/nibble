@@ -65,10 +65,10 @@ already closed.
 | 4   | Nibble answers        | Slice 4 — Nibble answers  | done, merged            |
 | 4.5 | On the internet       | — (unplanned)             | done, merged, deployed  |
 | 4.6 | What real use broke   | — (unplanned)             | done, merged            |
-| 5   | Make it Nibble        | Slice 5 — Make it Nibble  | paused — now last       |
+| 5   | Make it Nibble        | Slice 5 — Make it Nibble  | **current — the last**  |
 | 6   | Quiz yourself         | Slice 6 — Quiz yourself   | done, merged            |
 | 7   | The classroom         | Slice 7 — The classroom   | done, merged            |
-| 8   | Marking               | Slice 8 — Marking         | built, not yet merged   |
+| 8   | Marking               | Slice 8 — Marking         | done, merged            |
 
 **Build order is no longer the same as the numbering**, as of 2026-09-08: deploy
 4.5, then 6, 7, 8, and slice 5 last. Why is under "Current state" below.
@@ -89,9 +89,21 @@ request from the top of that pile is a 3,000-line diff nobody really reads. Slic
 branches off `main` instead of off slice 7, which is the first time since slice 4
 that a slice has started from a clean base.
 
-**Slice 8 is building**, off `feat/slice-8-marking`. What it decided before starting
-is under Slice 8 below, including the one decision that reaches backwards into slice
-7's schema: students now have names.
+**Slice 8 merged as PR #47**, and `main` is at `9aafa0c`. What it decided before
+starting is under Slice 8 below, including the one decision that reaches backwards
+into slice 7's schema: students now have names.
+
+**So slice 5 is the last slice, and it restarted on 2026-09-09.** Every other slice
+is merged. What it is doing is under Slice 5 below — the four narrow things it was
+always going to do, plus a recolour to the pitch deck's surfaces and the responsive
+pass the app has never had. The one thing worth carrying up here is that **a piece of
+slice 5's own plan turned out to be wrong once somebody tried to build on it**, and it
+is corrected in place rather than deleted.
+
+**#22 and #23 are still open on the board although slices 6 and 7 shipped them.** The
+paragraph under "The board now agrees with the code" predicted exactly this and it has
+come true: GitHub wins on status, and GitHub has not been told. Closing them is on the
+list of things needing a person.
 
 **Two things slice 7 owed are still owed**, and neither is fixed by merging it: a
 real class on two devices against the deployed backend, and timing the three-second
@@ -2108,9 +2120,20 @@ That is a real cost and it is being accepted with eyes open, not overlooked.
 
 ### Checklist
 
-- [ ] **`fix/borders-and-danger-token`** — the four broken lines above. Its own
-      pull request, first, because "these borders do not render" is its own claim
-      and deserves its own review rather than being buried in a restyle.
+- [x] **`fix/borders-and-danger-token`** — done. Its own pull request, first,
+      because "these borders do not render" is its own claim and deserves its own
+      review rather than being buried in a restyle. **It was five lines, not four**
+      — `var(--radius, 8px)` on the chunk box is the same mistake as the other
+      four, a token that already exists written with a raw fallback beside it, and
+      it was sitting two lines below one of them.
+
+      **And the fix uncovered a rule collision worth more than the fix.**
+      `design.md` says errors are coral and also says colour never carries a
+      meaning alone. Coral text breaks both: `#F26B3D` on white is about **3.2:1**,
+      under the 4.5:1 floor, and it is silent to a screen reader. So the sentence
+      stays ink and the coral moved into a `!` mark beside it — ink on coral, the
+      same way every button in this app is ink on a bright colour. That is
+      `.notice-bad` in `global.css`, and it settles the first bullet of #20 below.
 - [ ] **#18 `Button.jsx`** — `variant` of `primary` / `secondary` / `accent`, plus
       a `plain` variant for the note-row filename toggle, which has to stay a real
       `<button>` for the keyboard while not looking like one. Replaces every raw

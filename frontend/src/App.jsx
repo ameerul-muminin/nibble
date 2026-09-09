@@ -944,7 +944,10 @@ function Nibble({ door, onDoor }) {
 
         {/* One plain sentence when something went wrong. Never a raw error. */}
         {notice && (
-          <p role="status" style={{ color: 'var(--danger, #b3261e)' }}>
+          <p role="status" className="notice-bad">
+            <span className="notice-bad__mark" aria-hidden="true">
+              !
+            </span>
             {notice}
           </p>
         )}
@@ -1000,7 +1003,7 @@ function Nibble({ door, onDoor }) {
                   alignItems: 'center',
                   gap: 'var(--gap-sm)',
                   padding: 'var(--gap-sm) 0',
-                  borderBottom: '2px solid var(--border, #eee)',
+                  borderBottom: 'var(--border)',
                 }}
               >
                 {/*
@@ -1101,7 +1104,10 @@ function Nibble({ door, onDoor }) {
           )}
 
           {chunksStatus === 'failed' && (
-            <p style={{ color: 'var(--danger, #b3261e)' }}>
+            <p className="notice-bad">
+              <span className="notice-bad__mark" aria-hidden="true">
+                !
+              </span>
               Could not load the pieces. Check the backend is running, then click the note
               again.
             </p>
@@ -1125,8 +1131,8 @@ function Nibble({ door, onDoor }) {
                   <li
                     key={chunk.id}
                     style={{
-                      border: '2px solid var(--border, #eee)',
-                      borderRadius: 'var(--radius, 8px)',
+                      border: 'var(--border)',
+                      borderRadius: 'var(--radius)',
                       padding: 'var(--gap-sm)',
                       marginBottom: 'var(--gap-sm)',
                     }}
