@@ -20,6 +20,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { getResults, setMark } from '../api'
+import { Button } from './Button'
 
 /**
  * A student's answers, drawn against every question rather than only the ones
@@ -102,25 +103,23 @@ function StudentAnswers({ questions, answers, busyId, onMark }) {
                 reader is told which of the two the mark currently is, not just
                 that there are two buttons here.
               */}
-              <button
-                type="button"
-                className="btn btn--secondary"
+              <Button
+                variant="secondary"
                 aria-pressed={right}
                 disabled={busyId === answer.id || right}
                 onClick={() => onMark(answer.id, 1)}
               >
                 Mark right
-              </button>
+              </Button>
 
-              <button
-                type="button"
-                className="btn btn--secondary"
+              <Button
+                variant="secondary"
                 aria-pressed={!right}
                 disabled={busyId === answer.id || !right}
                 onClick={() => onMark(answer.id, 0)}
               >
                 Mark wrong
-              </button>
+              </Button>
 
               {answer.overridden && (
                 <span style={{ color: 'var(--text-muted)' }}>
@@ -263,14 +262,13 @@ export function Results({ roomId }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--gap)', flexWrap: 'wrap' }}>
         <h3 style={{ margin: 0 }}>Marking</h3>
 
-        <button
-          type="button"
-          className="btn btn--secondary"
+        <Button
+          variant="secondary"
           style={{ marginLeft: 'auto' }}
           onClick={handleRefresh}
         >
           Refresh
-        </button>
+        </Button>
       </div>
 
       {/*
@@ -373,14 +371,13 @@ export function Results({ roomId }) {
                     )}
 
                     {student.submitted && (
-                      <button
-                        type="button"
-                        className="btn btn--secondary"
+                      <Button
+                        variant="secondary"
                         aria-expanded={open}
                         onClick={() => toggle(student.user_id)}
                       >
                         {open ? 'Hide answers' : 'Show answers'}
-                      </button>
+                      </Button>
                     )}
                   </div>
 

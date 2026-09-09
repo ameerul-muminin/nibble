@@ -12,6 +12,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAuth, UserButton } from '@clerk/react'
 import { ask, deleteDocument, getChunks, getHealth, listDocuments, search, setTokenGetter, uploadDocument } from './api'
+import { Button } from './components/Button'
 import { Classroom } from './components/Classroom'
 import { Landing } from './components/Landing'
 import { QuizMe } from './components/QuizMe'
@@ -596,15 +597,14 @@ function Nibble({ door, onDoor }) {
             ['teach', 'Teach a class'],
             ['join', 'Join a class'],
           ].map(([name, label]) => (
-            <button
+            <Button
               key={name}
-              type="button"
-              className={door === name ? 'btn btn--primary' : 'btn btn--secondary'}
+              variant={door === name ? 'primary' : 'secondary'}
               aria-pressed={door === name}
               onClick={() => onDoor(name)}
             >
               {label}
-            </button>
+            </Button>
           ))}
         </nav>
       </header>
@@ -616,11 +616,171 @@ function Nibble({ door, onDoor }) {
       {door === 'notes' && (
         <div className="notes-grid">
         {/*
-          Everything below here is Your notes: slices 0 through 6.
+          Step one, across the full width of the grid, because nothing else on
+          this page does anything until a note exists. It was three cards down
+          before, which meant the first thing a new person saw was a question
+          box for notes they had not uploaded yet.
+        */}
+        <div className="notes-top">
 
-          Two columns on a laptop, stacked on anything smaller. Asking and
-          searching are the things you came to do, so they get the wider column;
-          the notes they draw from sit beside them instead of a scroll away.
+      {/*
+        Slice 1 — your notes. Issues #5 (list and upload) and #7 (delete).
+        The layout, classes and file-input plumbing are built; the behaviour
+        is marked TODO in the handlers above.
+      */}
+      <section className="card">
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 'var(--gap)',
+            marginBottom: 'var(--gap)',
+          }}
+        >
+          <h2 style={{ margin: 0 }}>Your notes</h2>
+
+          {/*
+            The real file input is hidden, because a raw one cannot be styled
+            and looks nothing like the rest of the page. The button below is
+            what people see, and clicking it clicks this through the ref.
+          */}
+          <input
+            type="file"
+            ref={fileInput}
+            hidden
+            accept=".pdf,.txt,.md,.png,.jpg,.jpeg,.webp"
+            onChange={handleFileChosen}
+          />
+
+          <Button
+            variant="primary"
+            style={{ marginLeft: 'auto' }}
+            disabled={busy || docsStatus !== 'ready'}
+            onClick={() => fileInput.current.click()}
+          >
+            {busy ? 'Reading…' : 'Add a note'}
+          </Button>
+        </div>
+
+        {/*
+          What is happening while an upload is in flight.
+
+          This is here because "Reading…" on a button is not enough feedback for
+          how long this actually takes. Nibble turns every piece of a chapter
+          into numbers before it stores it, on the free host's very small share
+          of a CPU, and a chapter can take a minute or more. With nothing on
+          screen, people conclude it has hung and reload — which loses the
+          upload that was very nearly finished.
+
+          Two sentences: what it is doing, and roughly how long. Saying "this
+          takes a moment" without a number is the thing that reads as a hang.
+        */}
+        {busy && (
+          <p role="status" style={{ color: 'var(--text-muted)' }}>
+            Reading your note and getting it ready to search. A long chapter can take
+            a minute or two — you can leave this open.
+          </p>
+        )}
+
+        {/* One plain sentence when something went wrong. Never a raw error. */}
+        {notice && (
+          <p role="status" className="notice-bad">
+            <span className="notice-bad__mark" aria-hidden="true">
+              !
+            </span>
+            {notice}
+          </p>
+        )}
+
+        {docsStatus === 'loading' && (
+          <p style={{ color: 'var(--text-muted)' }}>Fetching your notes…</p>
+        )}
+
+        {/*
+          A failed load used to be a dead end: the upload button stays disabled
+          until the list is known, and nothing here offered a way to try again,
+          so one dropped request meant a page refresh. This retries in place.
+        */}
+        {docsStatus === 'failed' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--gap)' }}>
+            <p style={{ color: 'var(--text-muted)', margin: 0 }}>
+              {docsError || 'Could not load your notes. Check the backend is running.'}
+            </p>
+            <Button
+              variant="secondary"
+              onClick={() => setReloadKey((n) => n + 1)}
+            >
+              Try again
+            </Button>
+          </div>
+        )}
+
+        {/*
+          The empty state. Worth having from the start: the very first thing
+          anybody sees when they open Nibble is this, not a list.
+        */}
+        {docsStatus === 'ready' && docs.length === 0 && (
+          <p style={{ color: 'var(--text-muted)', marginBottom: 0 }}>
+            Nothing here yet. Add a chapter and Nibble will read it.
+          </p>
+        )}
+
+        {docsStatus === 'ready' && docs.length > 0 && (
+          <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+            {/*
+              One <li> per document. Every row needs key={doc.id}: React uses
+              the key to tell rows apart between redraws, and without it,
+              deleting the middle row can leave the wrong one on screen. The
+              database id is a perfect key — never the array index, which
+              changes the moment something is removed.
+            */}
+            {docs.map((doc) => (
+              <li
+                key={doc.id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 'var(--gap-sm)',
+                  padding: 'var(--gap-sm) 0',
+                  borderBottom: 'var(--border)',
+                }}
+              >
+                {/*
+                  A <button>, not a <div onClick>. It has to be reachable by Tab
+                  and operable with Enter and Space, and a real button is all
+                  three for free — see the accessibility floor in docs/design.md.
+                  aria-expanded tells a screen reader that this control opens
+                  something, and whether it is open right now.
+                */}
+                <Button
+                  variant="plain"
+                  onClick={() => toggleSelected(doc.id)}
+                  aria-expanded={selectedId === doc.id}
+                  style={{ flex: 1 }}
+                >
+                  {doc.filename}
+                </Button>
+                <span style={{ color: 'var(--text-muted)' }}>
+                  {doc.page_count} {doc.page_count === 1 ? 'page' : 'pages'}
+                </span>
+                <Button
+                  variant="secondary"
+                  aria-label={`Delete ${doc.filename}`}
+                  onClick={() => handleDelete(doc.id)}
+                >
+                  ×
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+        </div>
+
+        {/*
+          Below the upload card, two columns on a laptop and one on anything
+          smaller. The split is the order you actually do things in: get a note
+          in, ask it things, then test yourself on it and look inside it.
         */}
         <div className="notes-col">
 
@@ -721,13 +881,13 @@ function Nibble({ door, onDoor }) {
             disabled={askStatus === 'asking'}
           />
 
-          <button
+          <Button
             type="submit"
-            className="btn btn--primary"
+            variant="primary"
             disabled={askStatus === 'asking' || !question.trim()}
           >
             {askStatus === 'asking' ? 'Thinking…' : 'Ask'}
-          </button>
+          </Button>
         </form>
 
         {/* Announced to a screen reader when it changes, without stealing focus. */}
@@ -784,13 +944,13 @@ function Nibble({ door, onDoor }) {
             onChange={(event) => setQuery(event.target.value)}
           />
 
-          <button
+          <Button
             type="submit"
-            className="btn btn--primary"
+            variant="primary"
             disabled={searchStatus === 'searching' || !query.trim()}
           >
             {searchStatus === 'searching' ? 'Looking…' : 'Search'}
-          </button>
+          </Button>
         </form>
 
         {/*
@@ -888,13 +1048,18 @@ function Nibble({ door, onDoor }) {
         )}
       </section>
 
+        </div>
+
+        <div className="notes-col">
+
       {/*
         Slice 6 — quiz yourself.
 
-        Under asking and searching, because all three are things you do to a
-        note. It is made FROM a note, so you have to have one before it does
-        anything, and the empty state says so rather than offering a form that
-        cannot work.
+        Beside the pieces rather than under the question box, because this side
+        of the grid is what you make from a note and what is inside it, while
+        the left is the conversation with it. It is made FROM a note, so you
+        have to have one before it does anything, and the empty state says so
+        rather than offering a form that cannot work.
 
         `docs` is passed down rather than fetched again, so the note dropdown
         and the notes list can never disagree about what exists. onNoteGone lets
@@ -904,175 +1069,6 @@ function Nibble({ door, onDoor }) {
         a second way to refresh the same list.
       */}
       <QuizMe docs={docs} onNoteGone={() => setReloadKey((n) => n + 1)} />
-
-        </div>
-
-        <div className="notes-col">
-
-      {/*
-        Slice 1 — your notes. Issues #5 (list and upload) and #7 (delete).
-        The layout, classes and file-input plumbing are built; the behaviour
-        is marked TODO in the handlers above.
-      */}
-      <section className="card">
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 'var(--gap)',
-            marginBottom: 'var(--gap)',
-          }}
-        >
-          <h2 style={{ margin: 0 }}>Your notes</h2>
-
-          {/*
-            The real file input is hidden, because a raw one cannot be styled
-            and looks nothing like the rest of the page. The button below is
-            what people see, and clicking it clicks this through the ref.
-          */}
-          <input
-            type="file"
-            ref={fileInput}
-            hidden
-            accept=".pdf,.txt,.md,.png,.jpg,.jpeg,.webp"
-            onChange={handleFileChosen}
-          />
-
-          <button
-            type="button"
-            className="btn btn--primary"
-            style={{ marginLeft: 'auto' }}
-            disabled={busy || docsStatus !== 'ready'}
-            onClick={() => fileInput.current.click()}
-          >
-            {busy ? 'Reading…' : 'Add a note'}
-          </button>
-        </div>
-
-        {/*
-          What is happening while an upload is in flight.
-
-          This is here because "Reading…" on a button is not enough feedback for
-          how long this actually takes. Nibble turns every piece of a chapter
-          into numbers before it stores it, on the free host's very small share
-          of a CPU, and a chapter can take a minute or more. With nothing on
-          screen, people conclude it has hung and reload — which loses the
-          upload that was very nearly finished.
-
-          Two sentences: what it is doing, and roughly how long. Saying "this
-          takes a moment" without a number is the thing that reads as a hang.
-        */}
-        {busy && (
-          <p role="status" style={{ color: 'var(--text-muted)' }}>
-            Reading your note and getting it ready to search. A long chapter can take
-            a minute or two — you can leave this open.
-          </p>
-        )}
-
-        {/* One plain sentence when something went wrong. Never a raw error. */}
-        {notice && (
-          <p role="status" className="notice-bad">
-            <span className="notice-bad__mark" aria-hidden="true">
-              !
-            </span>
-            {notice}
-          </p>
-        )}
-
-        {docsStatus === 'loading' && (
-          <p style={{ color: 'var(--text-muted)' }}>Fetching your notes…</p>
-        )}
-
-        {/*
-          A failed load used to be a dead end: the upload button stays disabled
-          until the list is known, and nothing here offered a way to try again,
-          so one dropped request meant a page refresh. This retries in place.
-        */}
-        {docsStatus === 'failed' && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--gap)' }}>
-            <p style={{ color: 'var(--text-muted)', margin: 0 }}>
-              {docsError || 'Could not load your notes. Check the backend is running.'}
-            </p>
-            <button
-              type="button"
-              className="btn btn--secondary"
-              onClick={() => setReloadKey((n) => n + 1)}
-            >
-              Try again
-            </button>
-          </div>
-        )}
-
-        {/*
-          The empty state. Worth having from the start: the very first thing
-          anybody sees when they open Nibble is this, not a list.
-        */}
-        {docsStatus === 'ready' && docs.length === 0 && (
-          <p style={{ color: 'var(--text-muted)', marginBottom: 0 }}>
-            Nothing here yet. Add a chapter and Nibble will read it.
-          </p>
-        )}
-
-        {docsStatus === 'ready' && docs.length > 0 && (
-          <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
-            {/*
-              One <li> per document. Every row needs key={doc.id}: React uses
-              the key to tell rows apart between redraws, and without it,
-              deleting the middle row can leave the wrong one on screen. The
-              database id is a perfect key — never the array index, which
-              changes the moment something is removed.
-            */}
-            {docs.map((doc) => (
-              <li
-                key={doc.id}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 'var(--gap-sm)',
-                  padding: 'var(--gap-sm) 0',
-                  borderBottom: 'var(--border)',
-                }}
-              >
-                {/*
-                  A <button>, not a <div onClick>. It has to be reachable by Tab
-                  and operable with Enter and Space, and a real button is all
-                  three for free — see the accessibility floor in docs/design.md.
-                  aria-expanded tells a screen reader that this control opens
-                  something, and whether it is open right now.
-                */}
-                <button
-                  type="button"
-                  onClick={() => toggleSelected(doc.id)}
-                  aria-expanded={selectedId === doc.id}
-                  style={{
-                    flex: 1,
-                    textAlign: 'left',
-                    background: 'none',
-                    border: 'none',
-                    font: 'inherit',
-                    color: 'inherit',
-                    cursor: 'pointer',
-                    padding: 0,
-                  }}
-                >
-                  {doc.filename}
-                </button>
-                <span style={{ color: 'var(--text-muted)' }}>
-                  {doc.page_count} {doc.page_count === 1 ? 'page' : 'pages'}
-                </span>
-                <button
-                  type="button"
-                  className="btn btn--secondary"
-                  aria-label={`Delete ${doc.filename}`}
-                  onClick={() => handleDelete(doc.id)}
-                >
-                  ×
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
 
       {/*
         Slice 2 — issue #10. The pieces the selected note was cut into.
@@ -1094,14 +1090,13 @@ function Nibble({ door, onDoor }) {
           >
             <h2 style={{ margin: 0 }}>{selectedDoc ? `Inside ${selectedDoc.filename}` : 'Pieces'}</h2>
 
-            <button
-              type="button"
-              className="btn btn--secondary"
+            <Button
+              variant="secondary"
               style={{ marginLeft: 'auto' }}
               onClick={() => setSelectedId(null)}
             >
               Close
-            </button>
+            </Button>
           </div>
 
           <p style={{ color: 'var(--text-muted)', marginTop: 0 }}>

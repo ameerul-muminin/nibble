@@ -93,7 +93,8 @@
   align-items: start;
 }
 
-.notes-col {
+.notes-col,
+.notes-top {
   display: flex;
   flex-direction: column;
   gap: var(--gap-lg);
@@ -146,5 +147,12 @@
     display: grid;
     grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
     gap: var(--gap-lg);
+  }
+
+  /* Adding a note is step one, so it runs across both columns above them
+     rather than living in either. `1 / -1` is "first grid line to last",
+     which keeps saying the right thing if a third column ever appears. */
+  .notes-top {
+    grid-column: 1 / -1;
   }
 }

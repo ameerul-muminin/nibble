@@ -18,6 +18,7 @@
 import { useEffect, useState } from 'react'
 import { createRoom, deleteRoom, getRoom, listQuizzes, listRooms, setRoomState } from '../api'
 import { Results } from './Results'
+import { Button } from './Button'
 
 /**
  * How often the live screens ask the backend what changed, in milliseconds.
@@ -204,14 +205,13 @@ export function Classroom() {
       <section className="card" style={{ marginTop: 'var(--gap-lg)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--gap)' }}>
           <h2 style={{ margin: 0 }}>{open.title}</h2>
-          <button
-            type="button"
-            className="btn btn--secondary"
+          <Button
+            variant="secondary"
             style={{ marginLeft: 'auto' }}
             onClick={() => setOpen(null)}
           >
             ← All classes
-          </button>
+          </Button>
         </div>
 
         <p style={{ color: 'var(--text-muted)' }}>
@@ -269,25 +269,23 @@ export function Classroom() {
 
         <div style={{ display: 'flex', gap: 'var(--gap-sm)', flexWrap: 'wrap' }}>
           {open.state === 'waiting' && (
-            <button
-              type="button"
-              className="btn btn--primary"
+            <Button
+              variant="primary"
               disabled={busy}
               onClick={() => handleState('open')}
             >
               Start the quiz
-            </button>
+            </Button>
           )}
 
           {open.state === 'open' && (
-            <button
-              type="button"
-              className="btn btn--accent"
+            <Button
+              variant="accent"
               disabled={busy}
               onClick={() => handleState('closed')}
             >
               End the class
-            </button>
+            </Button>
           )}
 
           {open.state === 'closed' && (
@@ -382,9 +380,9 @@ export function Classroom() {
             ))}
           </select>
 
-          <button type="submit" className="btn btn--primary" disabled={busy || !quizId}>
+          <Button type="submit" variant="primary" disabled={busy || !quizId}>
             {busy ? 'Opening…' : 'Open a class'}
-          </button>
+          </Button>
         </form>
       )}
 
@@ -401,34 +399,27 @@ export function Classroom() {
                 borderBottom: 'var(--border)',
               }}
             >
-              <button
-                type="button"
+              <Button
+                variant="plain"
                 onClick={() => handleShow(room.id)}
                 style={{
                   flex: 1,
-                  textAlign: 'left',
-                  background: 'none',
-                  border: 'none',
-                  font: 'inherit',
-                  color: 'inherit',
-                  cursor: 'pointer',
                   padding: 0,
                 }}
               >
                 {room.title}
-              </button>
+              </Button>
 
               <span className="source-chip">{room.code}</span>
               <span style={{ color: 'var(--text-muted)' }}>{STATE_WORDS[room.state]}</span>
 
-              <button
-                type="button"
-                className="btn btn--secondary"
+              <Button
+                variant="secondary"
                 aria-label={`Delete the class ${room.title}`}
                 onClick={() => handleDelete(room.id)}
               >
                 ×
-              </button>
+              </Button>
             </li>
           ))}
         </ul>

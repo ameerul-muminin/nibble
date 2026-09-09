@@ -10,6 +10,7 @@
 
 import { SignInButton, SignUpButton } from '@clerk/react'
 import '../styles/landing.css'
+import { Button } from './Button'
 
 const STEPS = [
   {
@@ -60,9 +61,9 @@ export function Landing({ onDoor }) {
         */}
         <div className="landing-nav-actions">
           <SignInButton mode="modal">
-            <button type="button" className="btn btn--secondary">
+            <Button variant="secondary">
               Sign in
-            </button>
+            </Button>
           </SignInButton>
         </div>
       </header>
@@ -101,23 +102,23 @@ export function Landing({ onDoor }) {
             */}
             <div className="landing-cta">
               <SignUpButton mode="modal">
-                <button
-                  type="button"
-                  className="btn btn--primary landing-cta-big"
+                <Button
+                  variant="primary"
+                  className="landing-cta-big"
                   onClick={() => onDoor('notes')}
                 >
                   Start learning
-                </button>
+                </Button>
               </SignUpButton>
 
               <SignInButton mode="modal">
-                <button
-                  type="button"
-                  className="btn btn--secondary landing-cta-big"
+                <Button
+                  variant="secondary"
+                  className="landing-cta-big"
                   onClick={() => onDoor('join')}
                 >
                   Join a class
-                </button>
+                </Button>
               </SignInButton>
             </div>
             <p className="landing-micro">Free. No card. Your PDFs stay yours.</p>
