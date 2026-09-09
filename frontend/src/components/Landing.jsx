@@ -11,6 +11,7 @@
 import { SignInButton, SignUpButton } from '@clerk/react'
 import '../styles/landing.css'
 import { Button } from './Button'
+import { Mascot } from './Mascot'
 
 const STEPS = [
   {
@@ -142,7 +143,13 @@ export function Landing({ onDoor }) {
           <div className="landing-chat">
             <p className="bubble bubble--user">explain osmosis simply</p>
             <div className="landing-cat-row">
-              <img src="/wave-nibble.svg" alt="Nibble" className="landing-chat-art" />
+              {/*
+                The same happy Nibble the signed-in app puts beside a fresh
+                answer, so the promise here and the thing itself match. The
+                hero above keeps the flat wave-nibble.svg: that is a different,
+                richer drawing, and it never has to react to anything.
+              */}
+              <Mascot size={48} mood="happy" />
               <div>
                 <p className="bubble bubble--cat">
                   Water moves across a membrane toward the side with more solute.

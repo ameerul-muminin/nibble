@@ -156,3 +156,46 @@
     grid-column: 1 / -1;
   }
 }
+
+/* ---------- Nibble beside a sentence ---------- */
+
+/* An empty state or a loading line with the cat next to it. On a narrow card
+   the cat is the part that gives way — the sentence is the thing that has to
+   be readable. */
+
+.nibble-say {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+}
+
+.nibble-say > svg {
+  flex-shrink: 0;
+}
+
+/* The newest answer, with Nibble pleased about it. Top-aligned rather than
+   centred, so the cat sits by the first line of a long answer instead of
+   drifting down the middle of it. */
+
+.nibble-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--gap-sm);
+}
+
+.nibble-row > svg {
+  flex-shrink: 0;
+}
+
+@media (max-width: 640px) {
+  /* On a phone the cat is competing with the words for a 300px card. */
+  .nibble-say > svg {
+    width: 52px;
+    height: 52px;
+  }
+
+  .nibble-row > svg {
+    width: 36px;
+    height: 36px;
+  }
+}

@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useAuth, UserButton } from '@clerk/react'
 import { ask, deleteDocument, getChunks, getHealth, listDocuments, search, setTokenGetter, uploadDocument } from './api'
 import { Button } from './components/Button'
+import { Mascot } from './components/Mascot'
 import { Classroom } from './components/Classroom'
 import { Landing } from './components/Landing'
 import { QuizMe } from './components/QuizMe'
@@ -569,6 +570,13 @@ function Nibble({ door, onDoor }) {
       */}
       <header className="topbar on-dark">
         <div className="topbar__inner">
+          {/*
+            Nibble in the header, which is the one place it is always visible.
+            Decorative: the word "Nibble" is right beside it, so a screen reader
+            announcing a cat here would say the same thing twice.
+          */}
+          <Mascot size={52} />
+
           <div>
             <h1 className="topbar__word">Nibble</h1>
             <p className="topbar__tagline">Bite-sized answers from your own notes</p>
@@ -720,9 +728,12 @@ function Nibble({ door, onDoor }) {
           anybody sees when they open Nibble is this, not a list.
         */}
         {docsStatus === 'ready' && docs.length === 0 && (
-          <p style={{ color: 'var(--text-muted)', marginBottom: 0 }}>
-            Nothing here yet. Add a chapter and Nibble will read it.
-          </p>
+          <div className="nibble-say">
+            <Mascot size={72} mood="curious" />
+            <p style={{ color: 'var(--text-muted)', margin: 0 }}>
+              Nothing here yet. Add a chapter and Nibble will read it.
+            </p>
+          </div>
         )}
 
         {docsStatus === 'ready' && docs.length > 0 && (
@@ -805,9 +816,12 @@ function Nibble({ door, onDoor }) {
           is the first thing anybody sees when they open Nibble.
         */}
         {turns.length === 0 && askStatus === 'idle' && (
-          <p style={{ color: 'var(--text-muted)' }}>
-            Nothing asked yet. Try “explain this chapter in three sentences”.
-          </p>
+          <div className="nibble-say">
+            <Mascot size={72} mood="curious" />
+            <p style={{ color: 'var(--text-muted)', margin: 0 }}>
+              Nothing asked yet. Try “explain this chapter in three sentences”.
+            </p>
+          </div>
         )}
 
         {turns.length > 0 && (
@@ -819,7 +833,19 @@ function Nibble({ door, onDoor }) {
               marginBottom: 'var(--gap)',
             }}
           >
-            {turns.map((turn, index) => (
+            {turns.map((turn, index) => {
+              const fromNibble = turn.role !== 'user'
+
+              /*
+                Nibble sits beside the newest answer and no other. design.md is
+                blunt about why: a mascot that turns up next to every message
+                stops being charming within a day. It also steps aside while a
+                new question is in flight, because the thinking cat below the
+                transcript is the one that should be moving then.
+              */
+              const cheer = fromNibble && index === turns.length - 1 && askStatus === 'idle'
+
+              const bubble = (
               <div
                 /*
                   The index as the key, which is normally the wrong answer —
@@ -832,7 +858,7 @@ function Nibble({ door, onDoor }) {
                   string.
                 */
                 key={index}
-                className={`bubble ${turn.role === 'user' ? 'bubble--user' : 'bubble--cat'}`}
+                className={`bubble ${fromNibble ? 'bubble--cat' : 'bubble--user'}`}
               >
                 {turn.content}
 
@@ -861,7 +887,17 @@ function Nibble({ door, onDoor }) {
                   </div>
                 )}
               </div>
-            ))}
+              )
+
+              return cheer ? (
+                <div key={index} className="nibble-row">
+                  <Mascot size={48} mood="happy" />
+                  {bubble}
+                </div>
+              ) : (
+                bubble
+              )
+            })}
           </div>
         )}
 
@@ -893,9 +929,10 @@ function Nibble({ door, onDoor }) {
         {/* Announced to a screen reader when it changes, without stealing focus. */}
         <div role="status">
           {askStatus === 'asking' && (
-            <p style={{ color: 'var(--text-muted)', marginBottom: 0 }}>
-              Reading your notes…
-            </p>
+            <div className="nibble-say">
+              <Mascot size={56} mood="thinking" />
+              <p style={{ color: 'var(--text-muted)', margin: 0 }}>Reading your notes…</p>
+            </div>
           )}
 
           {askStatus === 'failed' && (
