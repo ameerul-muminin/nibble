@@ -17,6 +17,7 @@
 
 import { useEffect, useState } from 'react'
 import { createRoom, deleteRoom, getRoom, listQuizzes, listRooms, setRoomState } from '../api'
+import { Results } from './Results'
 
 /**
  * How often the live screens ask the backend what changed, in milliseconds.
@@ -284,7 +285,7 @@ export function Classroom() {
 
           {open.state === 'closed' && (
             <p style={{ color: 'var(--text-muted)', margin: 0 }}>
-              This class has finished. Marking what came back is slice 8.
+              This class has finished. What came back is below.
             </p>
           )}
         </div>
@@ -295,6 +296,18 @@ export function Classroom() {
             and signs them out.
           </p>
         )}
+
+        {/*
+          Slice 8. Not while `waiting`, because nobody can have handed anything
+          in yet and an empty marking table is noise on the screen with the code
+          on it. From `open` onwards it shows the papers that are already in —
+          the backend puts no state rule on this at all, and a fourth rule about
+          state would buy nothing.
+
+          Keyed by room id so moving between two classes rebuilds it rather than
+          showing one room's marks under another's title while it fetches.
+        */}
+        {open.state !== 'waiting' && <Results key={open.id} roomId={open.id} />}
       </section>
     )
   }

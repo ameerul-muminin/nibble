@@ -103,6 +103,11 @@ PROTECTED = [
     ("POST", "/rooms/join", {"code": "K7M2QP"}),
     ("GET", "/rooms/code/K7M2QP", None),
     ("POST", "/rooms/1/answers", {"answers": [{"question_id": 1, "chosen": 0}]}),
+    # Slice 8. Both of these are the teacher's, and the first is the only
+    # response in the whole API that contains an answer key — a 401 here is the
+    # difference between a marking screen and a way to read somebody's quiz.
+    ("GET", "/rooms/1/results", None),
+    ("PATCH", "/rooms/1/answers/1", {"mark": 1}),
 ]
 
 

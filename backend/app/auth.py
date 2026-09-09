@@ -19,11 +19,22 @@ character of the token and the signature stops matching.
 So: no shared password with Clerk, no database of sessions on our side, and no
 network call in the hot path once the keys are cached.
 
-**What we learn, and deliberately nothing more.** The `sub` claim — Clerk's
-opaque id for a person, something like ``user_2abc...``. That is the only thing
-about a human being this project stores. Not their email, not their name. A
-`documents` row belongs to that string, and that is the whole of "your notes are
-yours".
+**What we learn from the token, and deliberately nothing more.** The `sub` claim
+— Clerk's opaque id for a person, something like ``user_2abc...``. Not their
+email, not their name: this file never asks for a claim beyond the subject, so
+there is nothing else here to leak or to keep in step with Clerk. A `documents`
+row belongs to that string, and that is the whole of "your notes are yours".
+
+**One thing about a human being is stored elsewhere, since slice 8.** This
+docstring used to say the Clerk id was the only one, and that stopped being true
+the day the marking screen needed to say *who* handed in what:
+``room_members.name`` holds a student's display name, sent by the frontend from
+their Clerk profile when they join a class. It does not come through this file
+and nothing here verifies it — it is a label the client chose, only ever shown,
+never used to decide anything. See the comment on that column in ``db.py``.
+
+The sentence is amended rather than left alone because a comment that has quietly
+gone false is worse than no comment: the next person reads it and believes it.
 """
 
 import jwt
