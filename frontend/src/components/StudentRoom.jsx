@@ -56,7 +56,19 @@ export function StudentRoom() {
   // Every one of these can be missing — Clerk allows an account with an email
   // and nothing else — so this falls through to '' and the backend calls them
   // "Student 1" by join order. An empty name is normal here, not an error.
-  const { user } = useUser()
+  //
+  // **`isLoaded` matters as much as `user` does**, and leaving it out was a bug
+  // review caught. Being signed in does not mean the profile has arrived: for
+  // the first moments after this screen mounts, `user` is undefined and the
+  // name falls through to '' — which is indistinguishable, here, from somebody
+  // who genuinely has no name. Join in that window and the backend stores the
+  // empty one, and `INSERT OR IGNORE` means the first join wins *forever*: the
+  // student is "Student 3" on the marking screen for the rest of the lesson,
+  // even though Clerk knew their name a heartbeat later.
+  //
+  // So joining waits for this. It is a fraction of a second, against typing a
+  // six-character code, and it is the difference between a name and a number.
+  const { user, isLoaded } = useUser()
   const myName = user?.fullName || user?.firstName || user?.username || ''
 
   // What the student typed, before it is a room.
@@ -156,7 +168,11 @@ export function StudentRoom() {
 
   async function handleJoin(event) {
     event.preventDefault()
-    if (!code.trim()) return
+    // `isLoaded` as well as the code, because the button is not the only way
+    // into this function — Enter in the text box submits the form too, and a
+    // disabled button would not have stopped it. See the note over useUser: a
+    // join sent before Clerk has the profile stores an empty name permanently.
+    if (!code.trim() || !isLoaded) return
 
     setJoining(true)
     setNotice(null)
@@ -238,7 +254,11 @@ export function StudentRoom() {
               textTransform: 'uppercase',
             }}
           />
-          <button type="submit" className="btn btn--primary" disabled={joining || !code.trim()}>
+          <button
+            type="submit"
+            className="btn btn--primary"
+            disabled={joining || !code.trim() || !isLoaded}
+          >
             {joining ? 'Joining…' : 'Join'}
           </button>
         </form>

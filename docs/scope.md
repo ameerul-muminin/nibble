@@ -3076,6 +3076,57 @@ does not affect anything slice 8 does — the marking is right either way — bu
 whose answer is always the first option is a quiz a class works out in a minute.
 Noted, not chased.
 
+### Two found in review after the browser check, both valid, both fixed
+
+**A sixth race, and it makes a claim written above only half true.** "There is no
+race to lose here" went into this file and into `set_mark`'s docstring, and it was
+right about the `UPDATE` and wrong about the route. The `UPDATE` really does carry
+its ownership test inside itself. But `correct` lives on the question rather than
+on the answer, so the response cannot be built from what was sent — it has to be
+read back, and **that read was sitting after the commit.**
+
+Deleting a room, a quiz or a question all cascade as far as `answers`. So a teacher
+with two tabs open — marking in one, tidying up in the other — could have the row
+removed between the commit and the read, and the response builder would be handed
+`None`. That reaches somebody as a **500 whose body is the words "Internal Server
+Error"**, which is the exact failure `DatabaseOutOfDate` was given its own type to
+avoid one slice ago.
+
+The fix is the one slice 7's races got, and it is one statement moved: the read now
+happens **before** the commit, inside the write the `UPDATE` began. SQLite allows
+one writer, so a `DELETE` cannot commit until we finish. The same reasoning as
+`_state_now`, reached from the other end — not a read that goes stale before a
+write, but a read that happened after one.
+
+Worth keeping as a pattern rather than as a sixth incident: every one of these
+seven has been the same shape, two statements where the code reads as one. The
+docstring is corrected in place rather than replaced, because "this route has no
+race" was a confident sentence that was wrong, and the correction is more useful
+next to it than instead of it.
+
+**And a student could be stored nameless by being quick.** `useUser()` has an
+`isLoaded` and the join was ignoring it. Being signed in does not mean the profile
+has arrived: for the first moments after the screen mounts `user` is undefined and
+the name falls through to `''` — which is indistinguishable, at that point, from
+somebody who genuinely has no name.
+
+Join inside that window and the empty name is what gets stored, and because
+`INSERT OR IGNORE` means the first join wins **forever**, that student is "Student
+3" on the marking screen for the rest of the lesson even though Clerk knew their
+name a heartbeat later. The property that makes a refresh safe is the same one
+that makes this permanent.
+
+Joining now waits for `isLoaded` — the button is disabled, and `handleJoin` checks
+it as well, because Enter in the code box submits the form and a disabled button
+never saw it.
+
+**Neither has a test, and that is said here rather than left to be noticed.** The
+first is a race between two connections, and pinning the ordering from a test
+would be mostly scaffolding. The second is frontend behaviour, and this project
+has no frontend tests at all — lint and a real build are the whole of that side.
+Both were re-checked by running the end-to-end drive again, which passes; but that
+exercises the fixed path, not the broken one.
+
 ### Still needing a person
 
 - [x] **Opened in a browser, 2026-09-09, and it works end to end.** Sign in,

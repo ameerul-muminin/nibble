@@ -2433,11 +2433,18 @@ def set_mark(
     **There is no race to lose here, and that is worth saying rather than
     leaving to be inferred.** Review found five read-before-write gaps in slice
     7's room routes, every one of them a `SELECT` that had gone stale by the
-    time the `UPDATE` ran. This route has none, because there is nothing read
-    separately: the ownership test lives inside the `UPDATE` itself, as a
-    subquery, so "is this mine?" and "change it" are one statement. `rowcount`
-    then tells us which happened, and no second check is needed before the
-    commit.
+    time the `UPDATE` ran. This route has no such gap: the ownership test lives
+    inside the `UPDATE` itself, as a subquery, so "is this mine?" and "change
+    it" are one statement, and `rowcount` says which happened.
+
+    **That was not the whole story, and review caught the half that was
+    missing.** This docstring originally claimed the route had no race at all.
+    The `UPDATE` has none — but the read that builds the response is a second
+    statement, and it was sitting *after* the commit, where a cascading delete
+    could take the row out from under it. Same family as the five, arrived at
+    from the other direction: not a read that goes stale before a write, but a
+    read that happens after one. It is now above the commit, and the comment
+    down there says why that closes it.
 
     A mark that is already what you asked for is still a 200. It changed nothing
     and harmed nothing, exactly like asking a room for the state it is already
@@ -2473,8 +2480,22 @@ def set_mark(
                 detail="That answer isn’t here. Reload the class and try again.",
             )
 
-        db.commit()
-
+        # Read back BEFORE the commit, not after, and that ordering is the whole
+        # of it. `correct` lives on the question rather than on the answer, so
+        # the response cannot be built from what was sent — it has to be read.
+        #
+        # After the commit, this row can be gone. Deleting the room, the quiz or
+        # the question all cascade as far as `answers`, so a teacher with two
+        # tabs open — marking in one, tidying up in the other — could have the
+        # answer removed between the commit and the read. `row` would be None
+        # and building the response below would be an AttributeError, which
+        # reaches somebody as a 500 whose body is the words "Internal Server
+        # Error".
+        #
+        # Before the commit there is no such window. The UPDATE above has
+        # already begun the write, SQLite allows exactly one writer, and so a
+        # DELETE cannot commit until we finish — the same reasoning written out
+        # over _state_now, and the same fix slice 7's races got.
         row = db.execute(
             """
             SELECT a.id, a.question_id, a.chosen, a.mark, q.correct
@@ -2484,6 +2505,8 @@ def set_mark(
             """,
             (answer_id,),
         ).fetchone()
+
+        db.commit()
     finally:
         db.close()
 
