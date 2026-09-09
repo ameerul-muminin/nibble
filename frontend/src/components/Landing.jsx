@@ -29,7 +29,24 @@ const STEPS = [
   },
 ]
 
-export function Landing() {
+/**
+ * Slice 7 — the two doors.
+ *
+ * `onDoor` says which screen to land on once Clerk is finished. It is
+ * **navigation and nothing else**: it never leaves the browser, it grants
+ * nothing, and the backend would ignore it if it were sent. Being a teacher is
+ * owning a room — see docs/adr/0004-teacher-is-an-owner.md — and if a button on
+ * a landing page could make somebody one, a student could press it too.
+ *
+ * The handler goes on the button itself, inside `SignInButton`. That works
+ * because Clerk clones the child and *composes* its own click handler with the
+ * child's, calling this one first and then opening sign-in. It is worth knowing
+ * that this is Clerk being careful rather than a coincidence: it clones rather
+ * than wraps, so a component that named only the props it cared about and threw
+ * the rest away would silently drop Clerk's handler instead — which is the trap
+ * written up under Slice 5 in scope.md, pointing the other way.
+ */
+export function Landing({ onDoor }) {
   return (
     <div className="landing">
       <header className="landing-nav">
@@ -68,12 +85,34 @@ export function Landing() {
               Upload a chapter, ask a question, get an answer that comes from your
               material — with the page it came from.
             </p>
+            {/*
+              Two doors, one primary. "Start learning" stays the loud one because
+              it is what most people are here for; the classroom is a door, not a
+              competing pitch. Neither is a partition — a student joins a class
+              from inside the regular app, and a teacher quizzes himself from his
+              own notes, so whichever you press you can reach the other from the
+              header afterwards.
+            */}
             <div className="landing-cta">
               <SignUpButton mode="modal">
-                <button type="button" className="btn btn--primary landing-cta-big">
+                <button
+                  type="button"
+                  className="btn btn--primary landing-cta-big"
+                  onClick={() => onDoor('notes')}
+                >
                   Start learning
                 </button>
               </SignUpButton>
+
+              <SignInButton mode="modal">
+                <button
+                  type="button"
+                  className="btn btn--secondary landing-cta-big"
+                  onClick={() => onDoor('join')}
+                >
+                  Join a class
+                </button>
+              </SignInButton>
             </div>
             <p className="landing-micro">Free. No card. Your PDFs stay yours.</p>
           </div>

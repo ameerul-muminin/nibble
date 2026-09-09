@@ -67,7 +67,7 @@ already closed.
 | 4.6 | What real use broke   | — (unplanned)             | built, not yet merged   |
 | 5   | Make it Nibble        | Slice 5 — Make it Nibble  | paused — now last       |
 | 6   | Quiz yourself         | Slice 6 — Quiz yourself   | built, not yet merged   |
-| 7   | The classroom         | Slice 7 — The classroom   | open                    |
+| 7   | The classroom         | Slice 7 — The classroom   | built, not yet merged   |
 | 8   | Marking               | Slice 8 — Marking         | open                    |
 
 **Build order is no longer the same as the numbering**, as of 2026-09-08: deploy
@@ -2588,23 +2588,282 @@ because there, nobody is going to overrule it.
 
 ### Checklist
 
-- [ ] `api.md` — the eight room routes, written first
-- [ ] `db.py` — `rooms`, `room_members`, `answers`
-- [ ] `routes.py` — `POST /rooms`, `GET /rooms`, `POST /rooms/{id}/state`,
-      `POST /rooms/join`, `GET /rooms/code/{code}`, `POST /rooms/{id}/answers`
-      _(Fahim, scaffolded)_
-- [ ] Room codes from `secrets`, not `random`, six characters with no `O`/`0` or
+- [x] `api.md` — the eight room routes, written first
+- [x] `db.py` — `rooms`, `room_members`, `answers`
+- [x] `routes.py` — `POST /rooms`, `GET /rooms`, `GET /rooms/{id}`,
+      `POST /rooms/{id}/state`, `DELETE /rooms/{id}`, `POST /rooms/join`,
+      `GET /rooms/code/{code}`, `POST /rooms/{id}/answers` _(Fahim's file —
+      **built, not scaffolded**; see below)_
+- [x] Room codes from `secrets`, not `random`, six characters with no `O`/`0` or
       `I`/`1` in the alphabet — it gets read off a projector and typed
-- [ ] `Landing.jsx` — the two doors, minding the `SignInButton` trap already written
-      up under Slice 5 _(Arman, scaffolded)_
-- [ ] `App.jsx` — the header switch, the teacher's room screen with the code and a
-      live joiner count, Start and End _(Arman, scaffolded)_
-- [ ] The student path: "Join a class", the lobby, the questions, "Submitted", then
-      sign-out — #23 _(Arman, scaffolded; the polling effect's shell and cleanup
-      written out, the fetch inside left as `TODO(Arman)`)_
-- [ ] Tests for the four rules: no answer key to a student, no answering before
+- [x] `Landing.jsx` — the two doors, minding the `SignInButton` trap already written
+      up under Slice 5 _(Arman's area — **built, not scaffolded**)_
+- [x] `App.jsx` — the header switch, the teacher's room screen with the code and a
+      live joiner count, Start and End _(the room screen is `Classroom.jsx`; see
+      below)_
+- [x] The student path: "Join a class", the lobby, the questions, "Submitted", then
+      sign-out — #23 _(`StudentRoom.jsx`)_
+- [x] Tests for the four rules: no answer key to a student, no answering before
       Start or after End, no answering a room you did not join, 404 for a room that
       is not yours
+- [x] `api.js` — one function per route, and the eight added to `PROTECTED` in
+      `test_auth.py`. **310 backend tests pass**, 40 of them new.
+
+### Built, 2026-09-09, and six departures from the plan above
+
+**It was built in full rather than scaffolded, on the tech lead's instruction —
+for the second slice running.** Slice 6 recorded the same override once. Twice is
+a pattern rather than an exception, so it is worth saying plainly: the pull
+request gate is *explain this change in your own words*, and after this slice
+neither Fahim nor Arman has authored anything in `routes.py`, `App.jsx`,
+`Landing.jsx` or the two new components. Either they read these before the PR and
+take them on, or the gate is waived twice. That is a people decision and it is
+now overdue rather than pending.
+
+**Eight routes, and the checklist above named six.** The two added are
+`GET /rooms/{id}` and `DELETE /rooms/{id}`, and both are load-bearing rather than
+tidy: the teacher's screen needs something to poll for the joiner count, and
+without a delete a room list only ever grows and there is no way to take back a
+class opened by mistake. `api.md` said "the eight room routes" from the start;
+the checklist was the half that had not caught up.
+
+**The classroom screens are their own files, not `App.jsx`.** `Classroom.jsx` and
+`StudentRoom.jsx`, the same call slice 6 made for `QuizMe.jsx` and for the same
+reason — `App.jsx` was at 1,104 lines before this. What did land in `App.jsx` is
+the header switch and thirty lines of mounting.
+
+**Asking a room for the state it is already in is a `200`, not a `400`.** This is
+not in the plan above and it should have been. A teacher double-taps Start in
+front of a class; the room is already open; the strict version of "a room only
+moves forward" would put a red sentence on the projector for a press that changed
+nothing and harmed nothing. Backwards is still refused, and that is the move the
+rule exists for — reopening a closed room would let a second paper land against a
+class that is over.
+
+**`page` is stripped from a student's questions as well as `correct`.** The plan
+only named the answer key. A page number is a page of the teacher's note, which
+the student does not have and cannot check, so it buys them nothing and quietly
+says something about somebody else's chapter. Same field-by-field response, one
+more field not in it.
+
+**The sign-out waits four seconds.** "Students are signed out when the room
+closes" is what was asked for and it is what happens — but signing out unmounts
+the whole screen and drops the person on the landing page, so doing it the
+instant the poll reports `closed` means the sentence explaining what happened is
+never read. Four seconds, with a "Sign out now" button for anybody who does not
+want to wait. Written down because it is a softening of the requirement rather
+than an implementation detail.
+
+### Two decisions inside this worth knowing about
+
+**`answers.mark` is written in slice 7 although nothing reads it until slice 8.**
+It looks premature and it is the opposite. Slice 8 lets a teacher override a
+mark, and the moment they can, `chosen == correct` is no longer the answer —
+there would be two rules for one number and every screen would have to know which
+applies. Writing it at submit time makes an override an ordinary `UPDATE`. And
+adding the column later is the expensive move, because `CREATE TABLE IF NOT
+EXISTS` silently will not add a column to a table that already exists, which is
+the whole reason `_check_shape()` exists.
+
+**`rooms.state` has a `CHECK` constraint, the only one in the schema.** Both
+screens in this slice decide what to draw from that one value, so a fourth string
+appearing in that column would break both at once, and no test would necessarily
+catch it. Three states is a small enough list for the database to hold the whole
+rule.
+
+**Which door you came in by lives in `App`, not in `Nibble`.** It has to: signing
+in changes `key` on `<Nibble>`, and React then throws that component away along
+with every piece of state in it — which is the bug that wrapper was added to
+prevent in the first place. A choice made on the landing page, before signing in,
+would go with it. `App` is never unmounted, so the value survives, and it is
+passed back down as a prop.
+
+### Five races found in review, all five valid, all five fixed
+
+Every room route reads before it writes — is the class open, has this person
+answered, is this code free, where is this room now — and **the read is not
+inside the write**. Something else can commit in that gap. Review found five,
+across two passes, and they were all real, though only three could do damage
+worth the name:
+
+- **A closed class reopened by a Start that was still in flight.** Two of the
+  teacher's own requests overlap while the room is `waiting`; both read
+  `waiting`, both are legal moves from it, and the write was unconditional — so
+  whichever committed *second* won. End lands, the Start behind it overwrites
+  it, and a class that had finished is open again **with its questions being
+  handed out.** The worst outcome of anything found here, and the only one that
+  reaches the answers themselves.
+
+  It is also the hardest to reach through Nibble's own screens: Start and End
+  are never both drawn, because which one you see is decided by the state. It
+  takes two tabs, or something driving the API directly. Fixed on consequence
+  rather than likelihood.
+- **A paper stored after the class ended.** The teacher presses End between the
+  state check and the insert. This is the one that matters: it breaks the thing
+  `closed` exists to guarantee, and it puts a submission that arrived too late
+  into the teacher's marking. It is also the likeliest, because "time's up" and
+  a straggler handing in is a real classroom moment rather than a hypothetical.
+- **A second paper from the same student arriving at the same instant** — a
+  double-tap, or two tabs. Both get past the friendly check, the UNIQUE refuses
+  the second, and uncaught that is a **500** on the one action a student cares
+  about. `api.md` documents a 400 and a sentence.
+- **A student joining as the class ends.** A member row on a closed room and a
+  joiner count that rises after the class is over. Cosmetic — the student's
+  screen corrects itself three seconds later — and fixed because the fix was
+  already being written for the one above.
+- **Two rooms told the same code is free.** Needs two of a billion *and* the
+  same millisecond, so it will realistically never happen. Fixed because what it
+  did when it happened was hand a teacher a traceback.
+
+**Three different fixes, because they are three different situations.**
+
+Where the write *is* the thing that has to be conditional — moving a room from
+one state to the next — the condition goes into the write:
+`UPDATE rooms SET state = ? WHERE id = ? AND state = ?`. A compare-and-set. The
+row only moves if it is still where the check found it, so the rule "a room only
+ever moves forward" stops being something the code checks and becomes something
+the write cannot break. No retry loop is needed to settle it: every writer here
+only moves forwards, so a compare-and-set that fails means somebody else moved
+it forwards, and one more look says whether that landed where this request
+wanted or past it.
+
+Where a constraint already answers the question — a duplicate paper, a duplicate
+code — the constraint is what gets asked, and the error it raises is caught and
+turned into the sentence. That is not a new idea here: it is written out over the
+INSERT in `create_quiz`, in the words *"a re-check is the same race one line
+further down… the constraint is the only thing that can answer this without a
+gap"*.
+
+Where nothing constrains it — a room's `state` does not constrain an insert into
+`answers` — the check is **asked again after the insert and before the commit**,
+and the paper is rolled back if the answer changed. That works for one specific
+reason, written out over `_state_now()`: SQLite allows one writer at a time, so
+once our insert has begun, the teacher's End cannot commit until we finish. By
+that line the state has stopped moving. A re-check anywhere earlier would have
+been the same race a second time.
+
+**No contract changed.** Every status and sentence in `api.md` already covered
+these; what changed is that the code now delivers them instead of a 500.
+
+**Eight tests, and what they do not prove.** None of these can be provoked by
+timing a real request, so each test forces the interleaving instead — the second
+look at the world is made to return what it would have returned had the race
+happened. That proves the handling is right, and for two of them that the
+rollback really does undo a write that had already run. It does not prove the
+window is as narrow as the comments claim. Nothing in a test suite can.
+
+### A sixth was raised and declined, 2026-09-09
+
+Review then found the same pattern in `GET /rooms/code/{code}`: the student's
+poll reads the state, and if the teacher presses End in the moment after that
+read, the reply says `open` and carries the questions for a class that has just
+finished.
+
+The reading is correct. **It is not a bug, and the difference is that this route
+writes nothing.**
+
+Every one of the five above ends with something stored — a paper, a member row,
+a state — that outlives the moment it was decided in, and is wrong from then on.
+This one ends with a sentence about how things were when you asked. A read of a
+value that can change is stale the instant it returns, and no amount of
+re-reading fixes that: move the check to the last line before the response and
+End can still land while the JSON is being serialised, or while the bytes are on
+the wire, or while the student is looking at the screen. The window cannot be
+closed, only moved.
+
+What makes that acceptable rather than merely unavoidable:
+
+- **The reply is internally consistent.** `questions` and `state` are decided
+  from the same read, so the response never contradicts itself — it is one
+  coherent snapshot of a moment that has passed, not a mix of two.
+- **The screen corrects itself in three seconds**, because this route exists to
+  be called every three seconds. The finding's own premise is the mitigation.
+- **Nothing the student does with a stale paper survives.** `POST
+  /rooms/{id}/answers` checks the state when it runs and checks it again after
+  the insert, so a paper begun against stale questions is refused with a
+  sentence. **The rule lives on the write, which is the only place it can be
+  enforced**, and that is exactly where the five fixes above put it.
+- **Nothing is exposed that was not already theirs.** A student polling an open
+  room is entitled to those questions; receiving them a millisecond after End
+  rather than a millisecond before is not a disclosure. That is the opposite of
+  the reopened-room bug, where a class that had **finished** started handing
+  questions out again, with no time limit on it.
+
+Recorded rather than quietly skipped, so the next reviewer who spots it can see
+it was looked at and why the answer is no. Chasing it would mean adding a check
+that cannot deliver what it appears to promise, which is worse than the gap: it
+would suggest this reply is authoritative when it can never be.
+
+### Checked by running it, and what that does and does not prove
+
+- **318 backend tests pass**, 48 of them new. The four rules from the plan each
+  have a test, and the answer-key one asserts on the **keys** of the response
+  rather than on a value — the way that rule breaks is a field arriving that
+  nobody meant to send, and `correct != 1` would not notice a `dict(row)`.
+- **The three tables were created against the real `nibble.db`**, the one with
+  four slices of data already in it, with no error. That is the slice 4.5 hazard
+  checked rather than assumed.
+- **The `CHECK` was proved by trying to break it** — an insert with a fourth
+  state is refused by SQLite, not by us remembering to check.
+- **All eight routes answer on a real `uvicorn`**, not just the test client, and
+  they answer `401` without a token in our own sentence. This is the check that
+  would have caught slice 6's "the backend is running an older version" in one
+  step rather than three.
+- Frontend lint and a real `vite build` are both green.
+
+**Opened in a browser, by a person, 2026-09-09 — two accounts, one machine.**
+A teacher signed in and opened a class; a second account signed in separately,
+typed the code, and joined it. That is the claim this slice exists to make and
+it is the first time in four slices that the browser check has not been left
+open. Everything above it is HTTP and lint, which say nothing about whether the
+page draws.
+
+**The backend was not running when it was first tried**, and the failure looked
+like the app rather than the absence of one — the notes list said it could not
+fetch. Worth keeping next to slice 6's stale-backend note, because it is the
+same family of problem and the message was less useful this time: "the backend
+is probably running an older version" names a cause that was not this one. A
+backend that is not there at all and a backend that is out of date reach `api.js`
+as the same failed `fetch`, and only one of them has a sentence.
+
+**The whole run, end to end.** Teacher opens the class, student joins with the
+code, teacher presses Start, student answers and hands in, teacher ends the
+class, and the student is signed out. Every state the machine has, in the order
+a lesson actually goes through them, including the one place in Nibble where the
+app signs somebody out on its own.
+
+This was recorded in two passes — the join first, then the rest — and the
+narrower version is left in the history rather than smoothed over, because
+writing down exactly how far a run went is the habit that keeps a ticked box
+worth reading.
+
+### Still needing a person
+
+- [ ] **Merge slice 6 first.** This branch sits on top of `slice-6-quiz-yourself`,
+      because slice 7's tables reference `quizzes` and `questions`. Opened as a PR
+      before slice 6 lands, its diff is two slices and 2,000 lines, which is the
+      review nobody really does.
+- [x] **Two accounts, one machine, on localhost, 2026-09-09.** Open, join, Start,
+      answer, hand in, End, sign-out — the whole three-state machine, in order.
+- [ ] **A real class, on two devices, against the deployed backend.** A teacher on
+      a laptop and a student on a phone. Two accounts on one machine proves the
+      code and the join; it does not prove two people seeing different things at
+      the same time over the internet on a tenth of a CPU. This is the slice that
+      needs the deploy, and it is still the claim that matters at the demo.
+- [ ] **Time the poll on Render's 0.1 CPU.** Thirty students at one request every
+      three seconds is about ten a second. The read touches one row and two
+      counts, so it should be comfortable — but "should be" is what slice 4.5 said
+      about upload speed before somebody measured three to four minutes. If it
+      bites, the fix is a bigger `POLL_MS` in `Classroom.jsx`, not a websocket.
+- [ ] **Editing a quiz while a room is running moves the answer key under the
+      class.** `PATCH` on a question does not know a room exists. Storing `mark`
+      at submit time contains the damage — papers already in are marked against
+      the key as it was — but a teacher can still confuse a class mid-quiz.
+      Not fixed, named.
+- [ ] **A refresh loses the student's place.** The code is not remembered
+      anywhere, so reloading returns to the join form and it has to be typed
+      again. Deliberate — the code is on the board in front of them, and storing
+      it would be a fourth place the truth about "which class am I in" lives.
 
 ## Slice 8: Marking
 

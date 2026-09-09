@@ -12,8 +12,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAuth, UserButton } from '@clerk/react'
 import { ask, deleteDocument, getChunks, getHealth, listDocuments, search, setTokenGetter, uploadDocument } from './api'
+import { Classroom } from './components/Classroom'
 import { Landing } from './components/Landing'
 import { QuizMe } from './components/QuizMe'
+import { StudentRoom } from './components/StudentRoom'
 import './styles/global.css'
 
 // What we say for each state. Errors tell you what to DO, never just "error".
@@ -50,6 +52,19 @@ const MESSAGES = {
 export default function App() {
   const { userId, getToken } = useAuth()
 
+  // Slice 7: which door somebody came in by. 'notes', 'teach' or 'join'.
+  //
+  // **It lives up here rather than in Nibble, and that is the whole reason it
+  // works.** The doors are on the landing page, which Nibble renders — and the
+  // moment you sign in, `key` below changes and React throws that Nibble away
+  // along with every piece of state in it, on purpose. A choice made before
+  // signing in would go with it. App is never thrown away, so this survives.
+  //
+  // It is navigation and nothing else. It is never sent to the backend, and the
+  // backend would ignore it if it were: being a teacher is owning a room, not
+  // claiming to be one. See docs/adr/0004-teacher-is-an-owner.md.
+  const [door, setDoor] = useState('notes')
+
   // Slice 4.5: teach api.js how to get a sign-in token, so every request it
   // makes carries one. See setTokenGetter in api.js for why it takes the
   // function rather than a token.
@@ -69,10 +84,10 @@ export default function App() {
   // ?? 'signed-out' because userId is null when nobody is signed in and
   // undefined while Clerk is still looking. A key of null or undefined is the
   // same as no key at all, which would leave the state exactly where it was.
-  return <Nibble key={userId ?? 'signed-out'} />
+  return <Nibble key={userId ?? 'signed-out'} door={door} onDoor={setDoor} />
 }
 
-function Nibble() {
+function Nibble({ door, onDoor }) {
   // Who is looking at this? isLoaded is false for the first moment, while Clerk
   // checks the browser for an existing session. Both flags matter: <Show> was
   // used here before and it renders NOTHING while loading, which is invisible
@@ -533,9 +548,10 @@ function Nibble() {
     )
   }
 
-  // Signed-out visitors get the landing page and nothing else.
+  // Signed-out visitors get the landing page and nothing else. onDoor is how
+  // its two doors say which screen to land on once Clerk is done.
   if (!isSignedIn) {
-    return <Landing />
+    return <Landing onDoor={onDoor} />
   }
 
   return (
@@ -560,6 +576,45 @@ function Nibble() {
           <UserButton />
         </div>
       </header>
+
+      {/*
+        Slice 7 — the switch between the three screens.
+
+        `door` is the whole of it: one value, three screens, and nothing else to
+        keep in step. Nobody is stuck behind the door they came in by — a student
+        can go back to their own notes, and a teacher can quiz himself — which is
+        the point made in adr/0004: the doors are navigation, never permission.
+
+        Real buttons, so Tab and Enter work for free, and aria-pressed says which
+        one you are on rather than leaving the lime background to say it alone.
+      */}
+      <nav
+        aria-label="Screens"
+        style={{ display: 'flex', gap: 'var(--gap-sm)', marginBottom: 'var(--gap-lg)', flexWrap: 'wrap' }}
+      >
+        {[
+          ['notes', 'Your notes'],
+          ['teach', 'Teach a class'],
+          ['join', 'Join a class'],
+        ].map(([name, label]) => (
+          <button
+            key={name}
+            type="button"
+            className={door === name ? 'btn btn--primary' : 'btn btn--secondary'}
+            aria-pressed={door === name}
+            onClick={() => onDoor(name)}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
+
+      {door === 'teach' && <Classroom />}
+      {door === 'join' && <StudentRoom />}
+
+      {door === 'notes' && (
+        <>
+        {/* Everything below here is Your notes: slices 0 through 6. */}
 
       <section className="card">
         <h2 style={{ marginBottom: 'var(--gap-sm)' }}>Slice 0 — is everything talking?</h2>
@@ -1098,6 +1153,8 @@ function Nibble() {
             </>
           )}
         </section>
+      )}
+        </>
       )}
     </main>
   )
