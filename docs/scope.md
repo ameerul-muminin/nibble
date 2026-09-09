@@ -3078,13 +3078,24 @@ Noted, not chased.
 
 ### Still needing a person
 
-- [ ] **Open it in a browser, with two accounts.** A teacher opens a class, a
-      student joins and hands in, the teacher ends it and marks what came back.
-      This is the only part of the slice nothing above has touched.
-- [ ] **Delete or move `backend/nibble.db` before running this branch.** It is a
-      slice 7 database and the backend will now refuse it by name. That is the
-      intended behaviour, not a bug — but it will be the first thing anybody
-      pulling this hits, and the sentence tells them what to do.
+- [x] **Opened in a browser, 2026-09-09, and it works end to end.** Sign in,
+      upload, quiz, open a class, join from a second account, hand in, End, and
+      mark what came back — reported working by the tech lead against a local
+      backend on a fresh database. That is the claim this slice exists to make,
+      and it is the second slice running where the browser check has not been
+      left open.
+
+      **What it does not cover, stated rather than implied:** one machine, one
+      browser, a local backend. It says nothing about two devices, the deployed
+      backend, or thirty students polling on a tenth of a CPU — which is slice
+      7's outstanding item and still outstanding.
+- [x] **`backend/nibble.db` was set aside on the lead's machine**, as
+      `nibble.db.pre-names-backup`, next to the `.pre-auth-backup` from slice
+      4.5. It held one note, one quiz and the slice 7 class, and it was refused
+      by name because its `room_members` had no `name` column — the check
+      working rather than a fault. **Everybody else pulling this branch hits the
+      same thing**, and the sentence tells them what to do; the uploaded files
+      are still in `backend/uploads/`, so re-uploading is a drag and drop.
 - [ ] **The name is a label a student chose.** Nothing stops somebody calling
       themselves something rude on the projector at a demo. Trimmed and capped,
       never trusted for anything, and worth knowing about before a room full of
